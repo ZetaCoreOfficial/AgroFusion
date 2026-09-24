@@ -9,6 +9,7 @@ use App\Models\Usuario;
 use App\Services\AlmacenCapacidadService;
 use App\Services\PuntoVentaAlmacenService;
 use App\Services\PuntoVentaInventarioPresentacionService;
+use App\Services\RecepcionPuntoVentaService;
 use App\Support\CuentaEstado;
 use App\Support\PuntoVentaAccess;
 use App\Support\PuntoVentaEliminacionCatalogo;
@@ -19,8 +20,11 @@ use Illuminate\View\View;
 
 class PuntoVentaController extends Controller
 {
-    public function index(Request $request, AlmacenCapacidadService $capacidadService): View
-    {
+    public function index(
+        Request $request,
+        AlmacenCapacidadService $capacidadService,
+        RecepcionPuntoVentaService $recepcionPdv
+    ): View {
         $user = $request->user();
         $query = PuntoVentaAccess::scopePuntosDelUsuario(
             PuntoVenta::query()->with(['minorista', 'almacen.unidadMedida']),
@@ -45,6 +49,8 @@ class PuntoVentaController extends Controller
         }
 
         $puntos = $query->orderByDesc('puntoventaid')->get();
+        $recepcionPdv->repararInventarioPedidosRecibidos($puntos);
+        $puntos->each(fn (PuntoVenta $p) => $p->loadMissing('almacen.unidadMedida'));
         $esAdmin = UsuarioRol::esAdminGlobal($user);
 
         $ocupacionPorPunto = [];

@@ -10,6 +10,7 @@ use App\Models\TipoMovimientoAlmacen;
 use App\Services\InventarioAlmacenProductoService;
 use App\Services\AlmacenCapacidadService;
 use App\Services\PuntoVentaInventarioPresentacionService;
+use App\Services\RecepcionPuntoVentaService;
 use App\Support\EliminacionSegura;
 use App\Support\PuntoVentaAccess;
 use App\Support\TrazabilidadProductoPdvService;
@@ -22,8 +23,11 @@ use Illuminate\View\View;
 
 class PuntoVentaInventarioController extends Controller
 {
-    public function index(Request $request, PuntoVentaInventarioPresentacionService $presentaciones): View
-    {
+    public function index(
+        Request $request,
+        PuntoVentaInventarioPresentacionService $presentaciones,
+        RecepcionPuntoVentaService $recepcionPdv
+    ): View {
         $user = $request->user();
 
         $puntos = PuntoVentaAccess::scopePuntosDelUsuario(
@@ -35,6 +39,9 @@ class PuntoVentaInventarioController extends Controller
         if ($request->filled('puntoventaid')) {
             $puntosFiltrados = $puntos->where('puntoventaid', (int) $request->puntoventaid)->values();
         }
+
+        // Pedidos ya «recibidos» sin stock visible en el almacén PDV (legado): acreditar una vez.
+        $recepcionPdv->repararInventarioPedidosRecibidos($puntosFiltrados);
 
         $termino = $request->filled('q') ? $request->string('q')->trim()->toString() : null;
         $lineas = $presentaciones->lineasParaPuntos($puntosFiltrados, $termino);
