@@ -19,6 +19,7 @@ use App\Services\CostoEnvioRutaService;
 use App\Services\NotificacionUsuarioService;
 use App\Services\RecepcionPlantaEnvioService;
 use App\Support\AlmacenAmbito;
+use App\Support\CampoAccess;
 use App\Support\EnvioAsignacionEstadoCatalogo;
 use App\Support\EnvioListadoService;
 use App\Support\EnvioPedidoService;
@@ -35,6 +36,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class PedidoController extends Controller
 {
@@ -63,9 +65,9 @@ class PedidoController extends Controller
 
         $numeroSolicitud = PedidoCatalogo::generarNumeroSolicitud();
 
-        $filtroAlmacenesAgricola = AlmacenAmbito::scope(
+        $filtroAlmacenesAgricola = CampoAccess::scopeAlmacenesAgricolas(
             Almacen::query()->where('activo', true),
-            AlmacenAmbito::AGRICOLA
+            $user
         )->orderBy('nombre')->get()->map(fn (Almacen $a) => [
             'value' => (string) $a->almacenid,
             'label' => $a->nombre,
@@ -137,31 +139,54 @@ class PedidoController extends Controller
     private function almacenesParaMapaEnvio(): array
     {
         $items = [];
+        $user = request()->user();
 
-        foreach ([AlmacenAmbito::AGRICOLA, AlmacenAmbito::PLANTA] as $ambito) {
-            $almacenes = AlmacenAmbito::scope(
-                Almacen::query()->where('activo', true),
-                $ambito
-            )->orderBy('nombre')->get();
+        $agricolas = CampoAccess::scopeAlmacenesAgricolas(
+            Almacen::query()->where('activo', true),
+            $user
+        )->orderBy('nombre')->get();
 
-            foreach ($almacenes as $almacen) {
-                $resuelto = UbicacionGpsParser::resolverAlmacen(
-                    (int) $almacen->almacenid,
-                    $almacen->nombre,
-                    $almacen->ubicacion
-                );
+        foreach ($agricolas as $almacen) {
+            $resuelto = UbicacionGpsParser::resolverAlmacen(
+                (int) $almacen->almacenid,
+                $almacen->nombre,
+                $almacen->ubicacion
+            );
 
-                $items[] = [
-                    'id' => $almacen->almacenid,
-                    'label' => $almacen->nombre,
-                    'extra' => [
-                        'lat' => $resuelto['lat'],
-                        'lng' => $resuelto['lng'],
-                        'direccion' => $resuelto['direccion'],
-                        'ambito' => $almacen->ambito ?? $ambito,
-                    ],
-                ];
-            }
+            $items[] = [
+                'id' => $almacen->almacenid,
+                'label' => $almacen->nombre,
+                'extra' => [
+                    'lat' => $resuelto['lat'],
+                    'lng' => $resuelto['lng'],
+                    'direccion' => $resuelto['direccion'],
+                    'ambito' => $almacen->ambito ?? AlmacenAmbito::AGRICOLA,
+                ],
+            ];
+        }
+
+        $plantas = AlmacenAmbito::scope(
+            Almacen::query()->where('activo', true),
+            AlmacenAmbito::PLANTA
+        )->orderBy('nombre')->get();
+
+        foreach ($plantas as $almacen) {
+            $resuelto = UbicacionGpsParser::resolverAlmacen(
+                (int) $almacen->almacenid,
+                $almacen->nombre,
+                $almacen->ubicacion
+            );
+
+            $items[] = [
+                'id' => $almacen->almacenid,
+                'label' => $almacen->nombre,
+                'extra' => [
+                    'lat' => $resuelto['lat'],
+                    'lng' => $resuelto['lng'],
+                    'direccion' => $resuelto['direccion'],
+                    'ambito' => $almacen->ambito ?? AlmacenAmbito::PLANTA,
+                ],
+            ];
         }
 
         return $items;
@@ -301,6 +326,9 @@ class PedidoController extends Controller
             'detalles.*.producto_ref.regex' => 'Seleccione un producto válido de producción agrícola.',
             'fechaEntregaDeseada.required' => 'Indique la fecha de entrega deseada.',
         ]);
+
+        // AGR-07: origen / recogidas solo desde almacén agrícola del propio jefe.
+        $this->assertAlmacenesAgricolasPropios($request->user(), $data);
 
         $erroresStock = PedidoCatalogo::validarStockDetallesPedido(
             $data['detalles'],
@@ -594,6 +622,53 @@ class PedidoController extends Controller
         }
 
         return back()->with('success', "Pedido {$pedido->numero_solicitud} recibido en planta. La carga se registró en el almacén de destino.");
+    }
+
+    /**
+     * AGR-07 — envío agrícola→planta solo desde almacén propio (CampoAccess).
+     * Solo se invoca desde store(), que autoriza exclusivamente TRAYECTO_PLANTA.
+     * Pedidos minorista/mayorista/PDV usan PedidoDistribucionController (sin este check).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertAlmacenesAgricolasPropios(?Usuario $user, array $data): void
+    {
+        if (! $user || UsuarioRol::esAdminGlobal($user)) {
+            return;
+        }
+
+        $errores = [];
+        $ids = [];
+
+        if (! empty($data['origen_almacenid'])) {
+            $ids['origen_almacenid'] = (int) $data['origen_almacenid'];
+        }
+
+        foreach ($data['recogidas'] ?? [] as $i => $recogida) {
+            if (! empty($recogida['almacenid'])) {
+                $ids['recogidas.'.$i.'.almacenid'] = (int) $recogida['almacenid'];
+            }
+        }
+
+        if ($ids === [] && UsuarioRol::gestionaCampo($user)) {
+            throw ValidationException::withMessages([
+                'origen_almacenid' => 'Debe indicar el almacén agrícola de origen de su equipo.',
+            ]);
+        }
+
+        foreach ($ids as $campo => $almacenId) {
+            $almacen = Almacen::query()->find($almacenId);
+            if ($almacen === null || ! CampoAccess::puedeVerAlmacen($user, $almacen)) {
+                $errores[$campo] = 'No puede usar un almacén agrícola que no pertenece a su equipo.';
+            } elseif (UsuarioRol::esJefeAgricultor($user)
+                && ! CampoAccess::puedeGestionarAlmacen($user, $almacen)) {
+                $errores[$campo] = 'Solo puede enviar desde un almacén agrícola del que es responsable.';
+            }
+        }
+
+        if ($errores !== []) {
+            throw ValidationException::withMessages($errores);
+        }
     }
 
     public function calcularCostoEnvio(Request $request, CostoEnvioRutaService $costoEnvio): JsonResponse

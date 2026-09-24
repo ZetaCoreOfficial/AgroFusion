@@ -355,7 +355,13 @@ class AsignacionEtapaPlantaService
             }
 
             if ($parametrosIngresados === []) {
-                $parametrosRegistrados = $paramService->parametrosRegistradosDesdePlan($locked);
+                $requeridos = $paramService->parametrosRequeridosParaAsignacion($locked);
+                if ($requeridos !== []) {
+                    throw new \InvalidArgumentException(
+                        'Debe registrar los parámetros medidos de la etapa. No se generan valores automáticamente.'
+                    );
+                }
+                $parametrosRegistrados = [];
             } else {
                 $parametrosRegistrados = $paramService->validarYFormatearValoresEtapa(
                     $locked,

@@ -154,7 +154,7 @@ class LoteProduccionParametrosService
                     'maq_minimo' => $maqLim['min'] ?? null,
                     'maq_maximo' => $maqLim['max'] ?? null,
                     'es_override' => $override !== null,
-                    'obligatorio' => true,
+                    'obligatorio' => (bool) ($override?->obligatorio ?? $pv->obligatorio ?? true),
                 ];
             }
 
@@ -252,6 +252,7 @@ class LoteProduccionParametrosService
                         'unidad' => $pv->variableEstandar?->unidad,
                         'valor_minimo' => $pv->valor_minimo,
                         'valor_maximo' => $pv->valor_maximo,
+                        'obligatorio' => (bool) ($pv->obligatorio ?? true),
                     ], $maqId);
                 }
             }
@@ -272,7 +273,10 @@ class LoteProduccionParametrosService
             $defs = $this->parametrosDesdeMaquina($maqId);
         }
 
-        return $defs;
+        return array_values(array_filter(
+            $defs,
+            fn (array $d) => (bool) ($d['obligatorio'] ?? true)
+        ));
     }
 
     /**
@@ -381,32 +385,20 @@ class LoteProduccionParametrosService
     }
 
     /**
-     * Valores de registro a partir del plan de ruta (rangos fijados por el jefe).
+     * @deprecated OPP-06 — no inventar mediciones con midpoint. Usar validarYFormatearValoresEtapa.
      *
      * @return list<array{variableestandarid: int, nombre: string, unidad: ?string, valor: float, valor_minimo: float, valor_maximo: float, cumple: bool}>
      */
     public function parametrosRegistradosDesdePlan(AsignacionEtapaPlanta $asignacion): array
     {
         $requeridos = $this->parametrosRequeridosParaAsignacion($asignacion);
-        $salida = [];
-
-        foreach ($requeridos as $req) {
-            $min = (float) $req['valor_minimo'];
-            $max = (float) $req['valor_maximo'];
-            $valor = round(($min + $max) / 2, 2);
-
-            $salida[] = [
-                'variableestandarid' => (int) $req['variableestandarid'],
-                'nombre' => $req['nombre'],
-                'unidad' => $req['unidad'] ?? null,
-                'valor' => $valor,
-                'valor_minimo' => $min,
-                'valor_maximo' => $max,
-                'cumple' => true,
-            ];
+        if ($requeridos !== []) {
+            throw new \InvalidArgumentException(
+                'Debe registrar los parámetros medidos de la etapa. No se generan valores automáticamente.'
+            );
         }
 
-        return $salida;
+        return [];
     }
 
     /**
@@ -433,10 +425,11 @@ class LoteProduccionParametrosService
             'valor_maximo' => $max,
             'maq_minimo' => $maqLim['min'] ?? null,
             'maq_maximo' => $maqLim['max'] ?? null,
+            'obligatorio' => array_key_exists('obligatorio', $v) ? (bool) $v['obligatorio'] : true,
         ];
     }
 
-    /** @return list<array{variableestandarid: int, nombre: string, unidad: ?string, valor_minimo: float, valor_maximo: float, maq_minimo: float, maq_maximo: float}> */
+    /** @return list<array{variableestandarid: int, nombre: string, unidad: ?string, valor_minimo: float, valor_maximo: float, maq_minimo: float, maq_maximo: float, obligatorio: bool}> */
     private function parametrosDesdeMaquina(int $maquinaplantaid): array
     {
         return MaquinaVariablePlanta::query()
@@ -451,6 +444,7 @@ class LoteProduccionParametrosService
                 'valor_maximo' => (float) $mv->valor_maximo,
                 'maq_minimo' => (float) $mv->valor_minimo,
                 'maq_maximo' => (float) $mv->valor_maximo,
+                'obligatorio' => (bool) ($mv->obligatorio ?? true),
             ])
             ->values()
             ->all();
