@@ -627,78 +627,12 @@ class LoteProduccionController extends Controller
 
     public function registrarEtapa(Request $request, LoteProduccionPedido $loteProduccion): RedirectResponse
     {
-        abort_unless(UsuarioRol::esPlantaOperativo($request->user()) || $request->user()?->hasRole('admin'), 403);
-
-        if ($this->trazabilidad->transformacionCompleta($loteProduccion)) {
-            return back()->with('error', 'La transformación ya finalizó con «'.ProcesoPlantaCatalogo::PROCESO_CIERRE_TRANSFORMACION.'».');
-        }
-
-        if ($this->transformacion->plantillaAgotada($loteProduccion)) {
-            return back()->with('error', 'Ya registró todos los pasos del proceso de transformación predefinido.');
-        }
-
-        $data = $request->validate([
-            'procesoplantaid' => ['required', 'integer', 'exists:proceso_planta,procesoplantaid'],
-            'maquinaplantaid' => ['required', 'integer', 'exists:maquina_planta,maquinaplantaid'],
-            'hora_inicio' => ['required', 'date'],
-            'hora_fin' => ['required', 'date', 'after_or_equal:hora_inicio'],
-            'observaciones' => ['nullable', 'string', 'max:500'],
-        ]);
-
-        $proceso = \App\Models\ProcesoPlanta::query()->findOrFail($data['procesoplantaid']);
-        if (in_array($proceso->nombre, ['Control de Calidad'], true)) {
-            return back()->with('error', '«Control de Calidad» corresponde a la fase de certificación, no a transformación.');
-        }
-
-        $maquina = MaquinaPlanta::find($data['maquinaplantaid']);
-
-        if (! MaquinaProcesoCompatibilidad::compatible((int) $data['procesoplantaid'], (int) $data['maquinaplantaid'])) {
-            return back()->with('error', 'La maquinaria «'.($maquina?->nombre ?? '').'» no es compatible con el proceso «'.$proceso->nombre.'».');
-        }
-
-        if ($maquina?->enMantenimiento()) {
-            return back()->with('error', 'La maquinaria «'.$maquina->nombre.'» está en mantenimiento. Espere a que vuelva a estar activa para registrar la etapa.');
-        }
-
-        try {
-            $paso = $this->transformacion->resolverPasoProcesoMaquina(
-                (int) $data['procesoplantaid'],
-                (int) $data['maquinaplantaid']
-            );
-        } catch (\InvalidArgumentException $e) {
-            return back()->with('error', $e->getMessage());
-        }
-
-        RegistroProcesoMaquinaPlanta::create([
-            'procesomaquinaplantaid' => $paso->procesomaquinaplantaid,
-            'loteproduccionpedidoid' => $loteProduccion->loteproduccionpedidoid,
-            'usuarioid' => $request->user()->usuarioid,
-            'variables_ingresadas' => json_encode([
-                'proceso' => $proceso->nombre,
-                'maquina' => MaquinaPlanta::find($data['maquinaplantaid'])?->nombre,
-            ]),
-            'cumple_estandar' => true,
-            'observaciones' => $data['observaciones'] ?? null,
-            'hora_inicio' => $data['hora_inicio'],
-            'hora_fin' => $data['hora_fin'],
-            'fecha_registro' => $data['hora_fin'],
-        ]);
-
-        if (! $loteProduccion->hora_inicio) {
-            $loteProduccion->update(['hora_inicio' => $data['hora_inicio']]);
-        }
-
-        $loteProduccion->update(['procesoplantaid' => $data['procesoplantaid']]);
-
-        $loteProduccion->refresh();
-        $mensaje = 'Etapa «'.$proceso->nombre.'» registrada.';
-        if ($this->trazabilidad->transformacionCompleta($loteProduccion)) {
-            $mensaje .= ' Transformación completada con «'.ProcesoPlantaCatalogo::PROCESO_CIERRE_TRANSFORMACION.'»: ya puede certificar el lote.';
-        }
-
-        return redirect()
-            ->route('procesamiento.show', $loteProduccion)
-            ->with('success', $mensaje);
+        // JPL-04: ruta legacy. El flujo canónico es asignar etapa + completar asignación.
+        // No permite crear registros de proceso saltando orden/ownership.
+        return back()->with(
+            'error',
+            'El registro libre de etapas está deshabilitado. Asigne la etapa al operario y complete desde Mis tareas o el timeline.'
+        );
     }
 
     public function certificar(Request $request, LoteProduccionPedido $loteProduccion): RedirectResponse

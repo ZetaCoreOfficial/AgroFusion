@@ -111,6 +111,15 @@ class ActividadController extends Controller
             unset($data['usuarioid']);
         }
 
+        if (array_key_exists('fechafin', $data) && $data['fechafin'] !== null) {
+            abort_unless(
+                ActividadPermisos::puedeMarcarCompletada($user, $actividad),
+                403,
+                'No puede completar esta actividad.'
+            );
+            app(\App\Support\ActividadSecuenciaService::class)->asegurarEnTurnoParaCompletar($actividad);
+        }
+
         $actividad->update($data);
 
         return response()->json($actividad);
