@@ -43,6 +43,7 @@ class RecepcionPuntoVentaService
 
         $pedido->load([
             'detalles.insumo.unidadMedida',
+            'detalles.presentacion.insumo.unidadMedida',
             'detalles.presentacion.tipoEmpaque',
             'detalles.inventarioPresentacionLote',
             'puntoVenta.almacen',
@@ -140,6 +141,7 @@ class RecepcionPuntoVentaService
             ->where('estado', PedidoDistribucionCatalogo::ESTADO_RECIBIDO)
             ->with([
                 'detalles.insumo.unidadMedida',
+                'detalles.presentacion.insumo.unidadMedida',
                 'detalles.presentacion.tipoEmpaque',
                 'detalles.inventarioPresentacionLote',
                 'puntoVenta.almacen',
@@ -153,7 +155,11 @@ class RecepcionPuntoVentaService
         }
 
         foreach ($pedidos as $pedido) {
-            $this->repararCreditoInventarioPedido($pedido, $tipoIngreso);
+            try {
+                $this->repararCreditoInventarioPedido($pedido, $tipoIngreso);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
     }
 
@@ -304,7 +310,7 @@ class RecepcionPuntoVentaService
             return 0.0;
         }
 
-        $detalle->loadMissing('presentacion', 'insumo.unidadMedida', 'inventarioPresentacionLote');
+        $detalle->loadMissing('presentacion.insumo.unidadMedida', 'insumo.unidadMedida', 'inventarioPresentacionLote');
         $presentacion = $detalle->presentacion;
 
         $nombrePdv = PedidoDistribucionConsolidacion::nombreProducto($detalle);
@@ -313,16 +319,30 @@ class RecepcionPuntoVentaService
             $nombrePdv .= ' - '.$lote;
         }
 
+        // Origen: detalle.insumo, o el insumo de la presentación comercial (pedidos sin insumoid).
         $insumoOrigen = $detalle->insumo;
-        if ($insumoOrigen === null) {
-            throw new \InvalidArgumentException('Producto de origen no encontrado.');
+        if ($insumoOrigen === null && $presentacion instanceof InsumoPresentacion) {
+            $insumoOrigen = $presentacion->insumo;
         }
+        if ($insumoOrigen === null && filled($detalle->insumoid)) {
+            $insumoOrigen = Insumo::query()->find((int) $detalle->insumoid);
+        }
+
+        $tipoInsumoId = $insumoOrigen?->tipoinsumoid ?? TipoInsumo::query()->value('tipoinsumoid');
+        $unidadMedidaId = $insumoOrigen?->unidadmedidaid
+            ?? \App\Models\UnidadMedida::query()->value('unidadmedidaid');
+
+        if ($tipoInsumoId === null || $unidadMedidaId === null) {
+            throw new \InvalidArgumentException('No hay catálogo de tipo/unidad para acreditar el producto en el PDV.');
+        }
+
+        $nombreOrigen = $insumoOrigen?->nombre ?? $nombrePdv;
 
         $insumoDestino = Insumo::query()
             ->where('almacenid', $almacenPdv->almacenid)
-            ->where(function ($q) use ($nombrePdv, $insumoOrigen) {
+            ->where(function ($q) use ($nombrePdv, $nombreOrigen) {
                 $q->whereRaw('LOWER(TRIM(nombre)) = ?', [Str::lower(trim($nombrePdv))])
-                    ->orWhereRaw('LOWER(TRIM(nombre)) = ?', [Str::lower(trim($insumoOrigen->nombre))]);
+                    ->orWhereRaw('LOWER(TRIM(nombre)) = ?', [Str::lower(trim($nombreOrigen))]);
             })
             ->first();
 
@@ -331,8 +351,8 @@ class RecepcionPuntoVentaService
             $insumoDestino = Insumo::create([
                 'nombre' => $nombrePdv,
                 'codigo_trazabilidad' => $codigo,
-                'tipoinsumoid' => $insumoOrigen->tipoinsumoid ?? TipoInsumo::query()->value('tipoinsumoid'),
-                'unidadmedidaid' => $insumoOrigen->unidadmedidaid,
+                'tipoinsumoid' => $tipoInsumoId,
+                'unidadmedidaid' => $unidadMedidaId,
                 'stock' => 0,
                 'stockminimo' => InsumoCatalogo::UMBRAL_ALERTA_STOCK,
                 'descripcion' => 'Producto recibido desde mayorista — '.$pedido->numero_solicitud,
