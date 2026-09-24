@@ -40,6 +40,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 use Illuminate\Support\Facades\Hash;
 
+use Illuminate\Support\Facades\Schema;
+
 use Spatie\Permission\Models\Role;
 
 use Tests\TestCase;
@@ -845,6 +847,12 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
         $planta = $this->almacen('Planta Aprobacion', AlmacenAmbito::PLANTA, 'GPS -17.78,-63.18');
 
+        $this->assertTrue(Schema::hasColumn('almacen', 'responsable_usuarioid'));
+
+        $planta->responsable_usuarioid = $jefe->usuarioid;
+
+        $planta->save();
+
         $mayorista = $this->almacen('Mayorista Aprobacion', AlmacenAmbito::MAYORISTA, 'GPS -17.79,-63.19');
 
         $insumo = $this->insumoPlanta($planta);
@@ -884,6 +892,94 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
 
         $this->assertSame(RutaDistribucionCatalogo::ESTADO_PLANIFICADA, $ruta->fresh()->estado);
+
+    }
+
+
+
+    public function test_jefe_planta_b_no_puede_aprobar_traslado_de_almacen_a(): void
+
+    {
+
+        $admin = $this->admin();
+
+        $jefeA = $this->jefePlanta();
+
+        Role::findOrCreate('jefe_planta', 'web');
+
+        $jefeB = Usuario::create([
+
+            'nombre' => 'Jefe',
+
+            'apellido' => 'PlantaB',
+
+            'email' => 'jefe.planta.b@test.local',
+
+            'nombreusuario' => 'jefe_planta_b',
+
+            'passwordhash' => Hash::make('secret'),
+
+            'role' => 'jefe_planta',
+
+            'fecharegistro' => now(),
+
+            'activo' => true,
+
+        ]);
+
+        $jefeB->assignRole('jefe_planta');
+
+
+
+        $plantaA = $this->almacen('Planta Origen A', AlmacenAmbito::PLANTA, 'GPS -17.78,-63.18');
+
+        $this->assertTrue(Schema::hasColumn('almacen', 'responsable_usuarioid'));
+
+        $plantaA->responsable_usuarioid = $jefeA->usuarioid;
+
+        $plantaA->save();
+
+
+
+        $mayorista = $this->almacen('Mayorista Negativo', AlmacenAmbito::MAYORISTA, 'GPS -17.79,-63.19');
+
+        $insumo = $this->insumoPlanta($plantaA);
+
+        $flota = $this->flotaPlanta();
+
+
+
+        $ruta = app(TrasladoPlantaMayoristaService::class)->crear(
+
+            $plantaA,
+
+            $mayorista,
+
+            (int) $flota['transportista']->usuarioid,
+
+            (int) $flota['vehiculo']->vehiculoid,
+
+            (int) $admin->usuarioid,
+
+            [['insumoid' => $insumo->insumoid, 'cantidad' => 16]],
+
+            null,
+
+            34.0
+
+        );
+
+
+
+        $this->actingAs($jefeB)
+
+            ->patch(route('logistica.traslados-planta.aceptar', $ruta))
+
+            ->assertForbidden();
+
+
+
+        $this->assertSame(RutaDistribucionCatalogo::ESTADO_PENDIENTE_APROBACION, $ruta->fresh()->estado);
 
     }
 
