@@ -118,7 +118,12 @@
                                 $unidad = $pres?->etiquetaUnidad() ?? 'u.';
                             @endphp
                             <tr>
-                                <td><span class="pdv-solicitud-pill"><i class="fas fa-file-alt"></i>{{ $pedido->numero_solicitud }}</span></td>
+                                <td>
+                                    <span class="pdv-solicitud-pill"><i class="fas fa-file-alt"></i>{{ $pedido->numero_solicitud }}</span>
+                                    @if(\App\Support\PedidoDistribucionCatalogo::esPedidoExterno($pedido))
+                                        <span class="badge badge-warning ml-1" title="Registrado por el mayorista">Externo · {{ \App\Support\PedidoDistribucionCatalogo::etiquetaCanal($pedido->canal_origen) }}</span>
+                                    @endif
+                                </td>
                                 <td>{{ $pedido->puntoVenta?->nombre ?? '—' }}</td>
                                 <td>{{ $det?->producto_nombre ?? '—' }}</td>
                                 <td>@if($det){{ number_format($det->cantidad, 0) }} <span class="text-muted small">{{ $unidad }}</span>@else — @endif</td>

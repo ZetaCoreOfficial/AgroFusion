@@ -34,14 +34,15 @@ class PedidosAccessTest extends TestCase
         return $user;
     }
 
-    public function test_admin_acceso_total_a_pedidos(): void
+    public function test_admin_consulta_pedidos_pero_no_crea_envios(): void
     {
         $admin = $this->createUser('admin');
         $this->actingAs($admin);
 
         $this->get(route('pedidos.index'))->assertRedirect(route('logistica.asignaciones.listado'));
         $this->get(route('logistica.asignaciones.listado'))->assertOk();
-        $this->get(route('pedidos.create'))->assertOk();
+        $this->get(route('pedidos.create'))->assertForbidden();
+        $this->post(route('pedidos.store'), [])->assertForbidden();
     }
 }
 

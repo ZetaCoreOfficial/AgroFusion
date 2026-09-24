@@ -12,9 +12,11 @@ use App\Models\RutaDistribucion;
 use App\Models\TipoInsumo;
 use App\Models\TipoMovimientoAlmacen;
 use App\Models\Usuario;
+use App\Support\FirmaCierreReglas;
 use App\Support\InsumoCatalogo;
 use App\Support\PedidoDistribucionCatalogo;
 use App\Support\PedidoDistribucionConsolidacion;
+use App\Support\UsuarioRol;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -31,6 +33,9 @@ class RecepcionPuntoVentaService
         if (! PedidoDistribucionCatalogo::puedeConfirmarRecepcion($pedido)) {
             throw new \InvalidArgumentException('El pedido no está en tránsito o ya fue recibido.');
         }
+
+        // Defensa en profundidad (MIN-08): el servicio no confía en que el controller ya autorizó.
+        $this->asegurarReceptorValido($pedido, $usuario);
 
         $pedido->load([
             'detalles.insumo.unidadMedida',
@@ -62,6 +67,13 @@ class RecepcionPuntoVentaService
         $tipoSalida = TipoMovimientoAlmacen::activosPorNaturaleza('salida')->firstOrFail();
 
         DB::transaction(function () use ($pedido, $usuario, $almacenPdv, $tipoIngreso, $tipoSalida) {
+            // Lock del pedido y revalidación del estado (MIN-03): un segundo request concurrente
+            // espera el lock, ve «recibido» y no acredita inventario otra vez.
+            $bloqueado = PedidoDistribucion::query()->whereKey($pedido->pedidodistribucionid)->lockForUpdate()->firstOrFail();
+            if (! PedidoDistribucionCatalogo::puedeConfirmarRecepcion($bloqueado)) {
+                throw new \InvalidArgumentException('El pedido ya fue recibido.');
+            }
+
             foreach ($pedido->detalles as $detalle) {
                 if ($this->salidaMayorista->yaDescontado($pedido, $detalle)) {
                     $this->salidaMayorista->descontarSoloInventarioSiPendiente($detalle, $pedido);
@@ -95,6 +107,38 @@ class RecepcionPuntoVentaService
                 $this->rutas->sincronizarEstadoRuta($ruta);
             }
         }
+    }
+
+    /**
+     * Receptor real: el minorista dueño del PDV, o el cierre de su ruta cuando ese minorista ya firmó
+     * la recepción con su cuenta (el conductor puede cerrar la parte logística, no recibir por él).
+     */
+    private function asegurarReceptorValido(PedidoDistribucion $pedido, Usuario $usuario): void
+    {
+        $pedido->loadMissing(['puntoVenta', 'rutaDistribucion.firmaRecepcion']);
+        $duenoPdv = (int) ($pedido->puntoVenta?->usuarioid ?? 0);
+
+        if ($duenoPdv <= 0) {
+            throw new \InvalidArgumentException('Pedido sin punto de venta asociado.');
+        }
+
+        if (! UsuarioRol::puedeOperar($usuario)) {
+            throw new \InvalidArgumentException('El administrador supervisa la recepción pero no la registra.');
+        }
+
+        if ((int) $usuario->usuarioid === $duenoPdv && UsuarioRol::esMinorista($usuario)) {
+            return;
+        }
+
+        $ruta = $pedido->rutaDistribucion;
+        $firma = $ruta?->firmaRecepcion;
+        if ($ruta !== null
+            && FirmaCierreReglas::recepcionValida($firma, $ruta->transportista_usuarioid)
+            && (int) $firma->firmante_usuarioid === $duenoPdv) {
+            return;
+        }
+
+        throw new \InvalidArgumentException('La recepción del punto de venta debe confirmarla el minorista dueño del punto.');
     }
 
     /** @return array<int, array{grupo: array<string, mixed>, detalle: DetallePedidoDistribucion}> */

@@ -79,15 +79,41 @@
                 <i class="fas fa-check-circle mr-1"></i>
                 La recepción ya fue firmada. Puede cerrar esta página.
             </div>
+        @elseif($requiereSesion)
+            <div class="rcp-alert rcp-alert--info">
+                <i class="fas fa-user-lock mr-1"></i>
+                Para firmar la recepción inicie sesión con la cuenta del receptor del destino.
+            </div>
+            <a href="{{ route('login') }}" class="rcp-btn rcp-btn--primary d-inline-block text-decoration-none">
+                <i class="fas fa-sign-in-alt mr-1"></i> Iniciar sesión para firmar
+            </a>
+        @elseif(! $puedeFirmar)
+            <div class="rcp-alert rcp-alert--warn mb-0">
+                <i class="fas fa-ban mr-1"></i>
+                La cuenta con la que inició sesión no es la del receptor de este envío.
+                El transportista no puede firmar la recepción.
+            </div>
         @else
             <p class="small text-muted mb-3">
-                Indique su nombre y firme para confirmar la recepción de la carga.
+                Firme para confirmar la recepción de la carga como
+                <strong>{{ trim(($usuario->nombre ?? '').' '.($usuario->apellido ?? '')) }}</strong>.
             </p>
             <form method="POST" action="{{ route('recepcion.publica.firmar', $token) }}" id="form-recepcion-publica">
                 @csrf
-                <label class="rcp-label" for="nombrefirmante">Nombre completo del receptor</label>
-                <input type="text" class="rcp-input" id="nombrefirmante" name="nombrefirmante"
-                       value="{{ old('nombrefirmante') }}" placeholder="Ej: María López" autocomplete="name">
+                @if(($lineasTraslado ?? collect())->isNotEmpty())
+                    <label class="rcp-label">Cantidad recibida por producto</label>
+                    <p class="small text-muted mb-2">Si llegó menos de lo despachado, indique cuánto y por qué. Solo se acredita lo recibido.</p>
+                    @foreach($lineasTraslado as $linea)
+                        @php $despachado = $linea->cantidadDespachada(); @endphp
+                        <div class="mb-2" data-linea-recepcion="{{ $linea->detalletrasladoid }}">
+                            <div class="small font-weight-bold">{{ $linea->producto_nombre }} — despachado {{ rtrim(rtrim(number_format($despachado, 2, '.', ''), '0'), '.') }}</div>
+                            <input type="number" class="rcp-input mb-1" step="0.01" min="0" max="{{ $despachado }}"
+                                   data-recibido value="{{ $despachado }}" aria-label="Cantidad recibida de {{ $linea->producto_nombre }}">
+                            <input type="text" class="rcp-input" maxlength="255" data-motivo
+                                   placeholder="Motivo de la diferencia (si corresponde)">
+                        </div>
+                    @endforeach
+                @endif
 
                 <label class="rcp-label">Firma</label>
                 <canvas class="rcp-firma-box" data-firma-canvas="recepcion" width="400" height="180"></canvas>
@@ -104,17 +130,10 @@
     </div>
 </div>
 
-<div class="rcp-modal-backdrop" id="modal-nombre-requerido" hidden>
-    <div class="rcp-modal" role="dialog" aria-modal="true" aria-labelledby="modal-nombre-titulo">
-        <h2 id="modal-nombre-titulo">Nombre requerido</h2>
-        <p>Debe escribir su nombre antes de confirmar la recepción.</p>
-        <button type="button" class="rcp-btn rcp-btn--primary" id="btn-cerrar-modal-nombre">Entendido</button>
-    </div>
-</div>
 @endsection
 
 @push('scripts')
-@if(! $yaFirmado && ! $sinFirmaTransportista)
+@if(! $yaFirmado && ! $sinFirmaTransportista && $puedeFirmar)
 <script src="{{ asset('js/firma-canvas.js') }}?v=3"></script>
 <script>
 (function () {
@@ -123,11 +142,6 @@
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        const nombre = document.getElementById('nombrefirmante').value.trim();
-        if (!nombre) {
-            document.getElementById('modal-nombre-requerido').hidden = false;
-            return;
-        }
 
         const canvas = document.querySelector('[data-firma-canvas="recepcion"]');
         if (!canvas) return;
@@ -157,8 +171,17 @@
                 'X-Requested-With': 'XMLHttpRequest',
             },
             body: JSON.stringify({
-                nombrefirmante: nombre,
                 imagen_firma: imagen,
+                recepcion: (function () {
+                    const lineas = {};
+                    document.querySelectorAll('[data-linea-recepcion]').forEach(function (fila) {
+                        lineas[fila.getAttribute('data-linea-recepcion')] = {
+                            recibido: fila.querySelector('[data-recibido]').value,
+                            motivo: fila.querySelector('[data-motivo]').value,
+                        };
+                    });
+                    return lineas;
+                })(),
             }),
         })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -184,20 +207,6 @@
                 btn.innerHTML = '<i class="fas fa-file-signature mr-1"></i> Confirmar recepción';
             });
     });
-
-    const modalNombre = document.getElementById('modal-nombre-requerido');
-    const btnCerrarModal = document.getElementById('btn-cerrar-modal-nombre');
-    if (modalNombre && btnCerrarModal) {
-        btnCerrarModal.addEventListener('click', function () {
-            modalNombre.hidden = true;
-            document.getElementById('nombrefirmante')?.focus();
-        });
-        modalNombre.addEventListener('click', function (ev) {
-            if (ev.target === modalNombre) {
-                modalNombre.hidden = true;
-            }
-        });
-    }
 })();
 </script>
 @endif

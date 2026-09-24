@@ -35,7 +35,7 @@ class ApiAccessTest extends TestCase
         return $user;
     }
 
-    public function test_admin_tiene_acceso_total_api(): void
+    public function test_admin_consulta_api_pero_no_ejecuta_operaciones(): void
     {
         $admin = $this->createUserWithRole('admin');
         Sanctum::actingAs($admin);
@@ -43,6 +43,11 @@ class ApiAccessTest extends TestCase
         $this->getJson('/api/pedidos')->assertOk();
         $this->getJson('/api/insumos')->assertOk();
         $this->getJson('/api/certificaciones')->assertOk();
+
+        // Sin bypass: el admin supervisor no crea pedidos, lotes ni insumos por API.
+        $this->postJson('/api/pedidos', [])->assertForbidden();
+        $this->postJson('/api/lotes', [])->assertForbidden();
+        $this->postJson('/api/insumos', [])->assertForbidden();
     }
 
     public function test_admin_accede_api_campo(): void

@@ -242,6 +242,14 @@
                     </div>
                 @endif
             </div>
+            @if(in_array($cert->blockchain_estado, ['pendiente', 'error'], true))
+                <form method="POST" action="{{ route('certificaciones.blockchain.sincronizar', $cert) }}" class="mt-3">
+                    @csrf
+                    <button type="submit" class="btn btn-sm btn-outline-success">
+                        <i class="fas fa-sync-alt mr-1"></i> Actualizar estado blockchain
+                    </button>
+                </form>
+            @endif
         </div>
     @endif
 

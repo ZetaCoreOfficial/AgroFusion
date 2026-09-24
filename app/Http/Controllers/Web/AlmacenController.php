@@ -30,8 +30,6 @@ use App\Services\AlmacenCapacidadService;
 
 use App\Services\InventarioPresentacionService;
 
-use App\Services\PedidoDistribucionSalidaMayoristaService;
-
 use App\Services\ProductoPlantaInventarioService;
 
 use App\Services\UbicacionesAlmacenService;
@@ -218,14 +216,13 @@ class AlmacenController extends Controller
         $ctx = AlmacenAmbito::contexto($request);
 
         $user = $request->user();
-        if ($user && ! UsuarioRol::esAdminGlobal($user)) {
-            if ($ctx['ambito'] === AlmacenAmbito::AGRICOLA && UsuarioRol::debeAcotarPorAsignacion($user)) {
-                abort(403, 'El operario agricultor no puede crear almacenes.');
-            }
-            if ($ctx['ambito'] === AlmacenAmbito::PLANTA && UsuarioRol::esOperarioPlanta($user)) {
-                abort(403, 'El operario de planta no puede crear almacenes.');
-            }
-        }
+        abort_unless(UsuarioRol::puedeOperar($user), 403);
+        abort_unless(match ($ctx['ambito']) {
+            AlmacenAmbito::AGRICOLA => UsuarioRol::gestionaCampo($user),
+            AlmacenAmbito::PLANTA => UsuarioRol::gestionaPlanta($user),
+            AlmacenAmbito::MAYORISTA => UsuarioRol::puedeGestionarDistribucionMayorista($user),
+            default => false,
+        }, 403);
 
         $data = $this->validarAlmacen($request);
 
@@ -276,15 +273,11 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: false);
 
+        // Un GET de visualización no descuenta stock ni crea movimientos (MAY-07): la salida
+        // mayorista se registra al iniciar la ruta, dentro de su transacción.
         $almacen->load(['unidadMedida', 'almacenamientos']);
-
-        if (($almacen->ambito ?? '') === AlmacenAmbito::MAYORISTA && $request->user() !== null) {
-            app(PedidoDistribucionSalidaMayoristaService::class)
-                ->reconciliarSalidasPendientesAlmacen($almacen, $request->user());
-            $almacen->refresh();
-        }
 
         $resumenCapacidad = $this->capacidadService->resumen($almacen);
 
@@ -319,7 +312,7 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarGestionAlmacen($request, $almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
 
 
@@ -343,7 +336,7 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarGestionAlmacen($request, $almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
 
 
@@ -393,7 +386,7 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarGestionAlmacen($request, $almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
         $eval = \App\Support\AlmacenEliminacionCatalogo::evaluar($almacen);
         if (! $eval['ok']) {
@@ -446,59 +439,50 @@ class AlmacenController extends Controller
 
     }
 
-    private function asegurarAccesoAlmacen(Request $request, Almacen $almacen, string $ambito): void
+    /** Lectura por ámbito; gestión solo para el responsable operativo de ese ámbito. */
+    private function asegurarAccesoAlmacen(Request $request, Almacen $almacen, string $ambito, bool $gestion): void
     {
         $this->asegurarAmbitoAlmacen($almacen, $ambito);
 
         $user = $request->user();
-        if (! $user || UsuarioRol::esAdminGlobal($user)) {
+        abort_if($user === null, 403);
+        if ($gestion) {
+            abort_unless(UsuarioRol::puedeOperar($user), 403);
+        } elseif (UsuarioRol::esAdminGlobal($user)) {
             return;
         }
 
         if ($ambito === AlmacenAmbito::AGRICOLA) {
             abort_unless(
-                \App\Support\CampoAccess::puedeVerAlmacen($user, $almacen),
+                $gestion ? CampoAccess::puedeGestionarAlmacen($user, $almacen) : CampoAccess::puedeVerAlmacen($user, $almacen),
                 403,
-                'No puede operar un almacén agrícola fuera de su alcance.'
+                'No tiene acceso a este almacén agrícola.'
             );
-        }
 
-        if (
-            $ambito === AlmacenAmbito::PLANTA
-            && (UsuarioRol::esJefePlanta($user) || UsuarioRol::esOperarioPlanta($user))
-        ) {
-            abort_unless(
-                \App\Support\PlantaAccess::puedeVerAlmacen($user, $almacen),
-                403,
-                'No puede operar un almacén de planta fuera de su alcance.'
-            );
-        }
-    }
-
-    private function asegurarGestionAlmacen(Request $request, Almacen $almacen, string $ambito): void
-    {
-        $this->asegurarAccesoAlmacen($request, $almacen, $ambito);
-
-        $user = $request->user();
-        if (! $user || UsuarioRol::esAdminGlobal($user)) {
             return;
-        }
-
-        if ($ambito === AlmacenAmbito::AGRICOLA) {
-            abort_unless(
-                \App\Support\CampoAccess::puedeGestionarAlmacen($user, $almacen),
-                403,
-                'Solo el jefe agricultor responsable puede administrar este almacén.'
-            );
         }
 
         if ($ambito === AlmacenAmbito::PLANTA) {
             abort_unless(
-                \App\Support\PlantaAccess::puedeGestionarAlmacen($user, $almacen),
+                $gestion ? \App\Support\PlantaAccess::puedeGestionarAlmacen($user, $almacen) : \App\Support\PlantaAccess::puedeVerAlmacen($user, $almacen),
                 403,
-                'Solo el jefe de planta responsable puede administrar este almacén.'
+                'No tiene acceso a este almacén de planta.'
             );
+
+            return;
         }
+
+        if ($ambito === AlmacenAmbito::MAYORISTA) {
+            if ($gestion) {
+                MayoristaAccess::asegurarPuedeGestionar($user, $almacen);
+            } else {
+                MayoristaAccess::asegurarPuedeVer($user, $almacen);
+            }
+
+            return;
+        }
+
+        abort(403);
     }
 
 
@@ -1159,4 +1143,3 @@ class AlmacenController extends Controller
     }
 
 }
-

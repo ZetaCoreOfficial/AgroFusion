@@ -26,6 +26,36 @@ final class PedidoDistribucionCatalogo
 
     public const TIPO_SOLICITUD_CUSTOM = 'custom';
 
+    /** Canal de origen (MAY-13): el minorista lo creó en la plataforma. */
+    public const CANAL_SISTEMA = 'sistema';
+
+    /** @var array<string, string> Canales externos: el mayorista registra el pedido a mano. */
+    public const CANALES_EXTERNOS = [
+        'whatsapp' => 'WhatsApp',
+        'telefono' => 'Teléfono',
+        'presencial' => 'Presencial',
+        'otro' => 'Otro canal',
+    ];
+
+    public static function esPedidoExterno(PedidoDistribucion $pedido): bool
+    {
+        return array_key_exists((string) ($pedido->canal_origen ?? self::CANAL_SISTEMA), self::CANALES_EXTERNOS);
+    }
+
+    public static function etiquetaCanal(?string $canal): string
+    {
+        return self::CANALES_EXTERNOS[$canal ?? ''] ?? 'Plataforma (minorista)';
+    }
+
+    /**
+     * El minorista edita/cancela solo mientras su solicitud está pendiente (MIN-04): una vez
+     * confirmada el contenido comercial queda congelado; los cambios pasan por «volver a revisión».
+     */
+    public static function puedeEditarSolicitudMinorista(PedidoDistribucion $pedido): bool
+    {
+        return self::pendienteAprobacionMayorista($pedido);
+    }
+
     public static function generarNumeroSolicitud(): string
     {
         $fecha = Carbon::now()->format('Ymd');

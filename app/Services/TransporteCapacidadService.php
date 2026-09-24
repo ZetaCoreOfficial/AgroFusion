@@ -75,9 +75,9 @@ class TransporteCapacidadService
 
     public function validarAsignacion(Usuario $transportista, Vehiculo $vehiculo): void
     {
-        if ($transportista->role !== 'transportista' || ! $transportista->activo) {
-            throw new InvalidArgumentException('El usuario seleccionado no es un transportista activo.');
-        }
+        // Pool único (TRA-04, TRA-06, TRA-09): rol Spatie, perfil del mismo ámbito que el vehículo,
+        // disponible y sin otro viaje en curso.
+        \App\Support\TransportistaPool::asegurarAsignable($transportista, $vehiculo->ambito_flota ?: null);
 
         if (! $vehiculo->activo) {
             throw new InvalidArgumentException('El vehículo seleccionado no está activo.');

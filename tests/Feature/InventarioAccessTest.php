@@ -34,22 +34,14 @@ class InventarioAccessTest extends TestCase
         return $user;
     }
 
-    public function test_admin_tiene_control_total_inventario(): void
+    public function test_admin_consulta_inventario_pero_no_lo_modifica(): void
     {
         $admin = $this->createUser('admin');
         $this->actingAs($admin);
 
         $this->get(route('insumos.index'))->assertOk();
-        $this->get(route('insumos.create'))->assertOk();
-    }
-
-    public function test_admin_puede_ver_y_crear_inventario_en_segunda_prueba(): void
-    {
-        $admin = $this->createUser('admin');
-        $this->actingAs($admin);
-
-        $this->get(route('insumos.index'))->assertOk();
-        $this->get(route('insumos.create'))->assertOk();
+        $this->get(route('insumos.create'))->assertForbidden();
+        $this->post(route('insumos.store'), [])->assertForbidden();
     }
 }
 

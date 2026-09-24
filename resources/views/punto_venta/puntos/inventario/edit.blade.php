@@ -59,6 +59,13 @@
                             </div>
                         </div>
                         <div class="form-group">
+                            <label>Motivo del ajuste de stock</label>
+                            <textarea name="motivo_ajuste" class="form-control @error('motivo_ajuste') is-invalid @enderror" rows="2" maxlength="500"
+                                placeholder="Obligatorio si cambia el stock: merma, conteo físico, devolución…">{{ old('motivo_ajuste') }}</textarea>
+                            @error('motivo_ajuste')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            <small class="form-text text-muted">El cambio de stock queda registrado como movimiento con su usuario y motivo.</small>
+                        </div>
+                        <div class="form-group">
                             <label>Descripción</label>
                             <textarea name="descripcion" class="form-control" rows="3" maxlength="500">{{ old('descripcion', $insumo->descripcion) }}</textarea>
                         </div>

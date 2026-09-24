@@ -133,10 +133,7 @@ final class DocumentoEntregaCatalogo
             return false;
         }
 
-        if (UsuarioRol::esAdminGlobal($user)) {
-            return true;
-        }
-
+        // Los documentos de entrega son evidencia de trazabilidad: el admin no los elimina.
         if (! $user->can('documentos.delete')) {
             return false;
         }

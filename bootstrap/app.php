@@ -24,6 +24,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->web(prepend: [
             \App\Http\Middleware\SyncAppUrlWithRequest::class,
+        ], append: [
+            \App\Http\Middleware\AdminSoloSupervision::class,
         ]);
 
         $middleware->validateCsrfTokens(except: [

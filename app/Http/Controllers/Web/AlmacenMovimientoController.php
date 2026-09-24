@@ -16,7 +16,9 @@ use App\Support\AlmacenAmbito;
 use App\Support\AlmacenPlantaCosechaCatalogo;
 use App\Support\CampoAccess;
 use App\Support\CampoJefeScope;
+use App\Support\MayoristaAccess;
 use App\Support\UsuarioRol;
+use App\Support\PlantaAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -86,6 +88,10 @@ class AlmacenMovimientoController extends Controller
             && $produccionAlmacenamiento->almacen?->ambito !== $ctx['ambito']) {
             abort(404);
         }
+        abort_unless(
+            $this->almacenVisible($ctx['ambito'], (int) $produccionAlmacenamiento->almacenid, $request->user()),
+            404
+        );
 
         $resumenCapacidad = $produccionAlmacenamiento->almacen
             ? $this->capacidadService->resumen($produccionAlmacenamiento->almacen)
@@ -107,7 +113,7 @@ class AlmacenMovimientoController extends Controller
 
         $baseInsumo = AlmacenMovimiento::query()
             ->with(['almacen', 'insumo.unidadMedida', 'tipo', 'usuario'])
-            ->whereHas('almacen', fn ($a) => AlmacenAmbito::scope($a, $ambito));
+            ->whereHas('almacen', fn ($a) => $this->scopeAlmacenesVisibles($a, $ambito, $user));
 
         if ($ambito === AlmacenAmbito::AGRICOLA) {
             CampoJefeScope::aplicarEnMovimientoPorUsuario($baseInsumo, $user);
@@ -146,7 +152,7 @@ class AlmacenMovimientoController extends Controller
         if ($ambito === AlmacenAmbito::AGRICOLA && $filtroNaturaleza !== 'salida') {
             $cosechas = ProduccionAlmacenamiento::query()
                 ->with(['almacen.responsable', 'produccion.lote.usuario', 'produccion.lote.cultivo', 'unidadMedida'])
-                ->whereHas('almacen', fn ($a) => AlmacenAmbito::scope($a, AlmacenAmbito::AGRICOLA));
+                ->whereHas('almacen', fn ($a) => $this->scopeAlmacenesVisibles($a, AlmacenAmbito::AGRICOLA, $user));
             CampoJefeScope::aplicarEnProduccionAlmacenamiento($cosechas, $user);
             $cosechas = $cosechas
                 ->orderByDesc('fechaentrada')
@@ -214,6 +220,7 @@ class AlmacenMovimientoController extends Controller
     public function create(Request $request, string $naturaleza)
     {
         abort_unless(in_array($naturaleza, ['ingreso', 'salida'], true), 404);
+        abort_unless(UsuarioRol::puedeOperar($request->user()), 403);
         $permisoCrear = $naturaleza === 'ingreso' ? 'almacen.ingresos.create' : 'almacen.salidas.create';
         abort_unless($request->user()?->can($permisoCrear), 403);
 
@@ -224,10 +231,13 @@ class AlmacenMovimientoController extends Controller
         }
 
         $user = $request->user();
-        $almacenes = AlmacenAmbito::scope(Almacen::query(), $ctx['ambito'])->orderBy('nombre');
+        $almacenes = $this->scopeAlmacenesVisibles(Almacen::query(), $ctx['ambito'], $user)->orderBy('nombre');
+        $almacenesList = $almacenes->get();
         $insumos = InsumoCatalogo::aplicarFiltroOperativo(
             Insumo::query()->with('unidadMedida')
-        )->orderBy('nombre');
+        )
+            ->whereIn('almacenid', $almacenesList->pluck('almacenid')->all() ?: [-1])
+            ->orderBy('nombre');
 
         $insumosList = $insumos->get();
         $guias = config('almacen_movimientos', []);
@@ -241,7 +251,6 @@ class AlmacenMovimientoController extends Controller
             return [$tipo->tipo_movimiento_almacenid => $texto ?? 'Motivo del movimiento según su operación interna.'];
         });
 
-        $almacenesList = $almacenes->get();
         $almacenIdInicial = (int) old('almacenid', $almacenesList->first()?->almacenid ?? 0) ?: null;
         $insumoIdInicial = (int) old('insumoid') ?: null;
         $tipoIdInicial = (int) old('tipo_movimiento_almacenid') ?: null;
@@ -303,6 +312,11 @@ class AlmacenMovimientoController extends Controller
         $tipoId = $request->integer('tipo_movimiento_almacenid') ?: null;
         $referencia = $request->string('referencia')->toString();
 
+        if ($almacenId !== null) {
+            $ctx = AlmacenAmbito::contexto($request);
+            abort_unless($this->almacenVisible($ctx['ambito'], $almacenId, $user), 403);
+        }
+
         $destinos = $destinosService->listar($naturaleza, $almacenId, $insumoId, $tipoId, $referencia ?: null);
         $destinoSugerido = $destinos[0]['items'][0]['valor'] ?? null;
 
@@ -325,6 +339,7 @@ class AlmacenMovimientoController extends Controller
         $almacenMovimiento->load(['almacen', 'insumo.unidadMedida', 'tipo', 'usuario']);
 
         $ctx = AlmacenAmbito::contexto($request);
+        abort_unless($this->almacenVisible($ctx['ambito'], (int) $almacenMovimiento->almacenid, $request->user()), 404);
 
         return view('almacen_movimientos.show', array_merge([
             'movimiento' => $almacenMovimiento,
@@ -335,6 +350,7 @@ class AlmacenMovimientoController extends Controller
     public function store(Request $request, string $naturaleza)
     {
         abort_unless(in_array($naturaleza, ['ingreso', 'salida'], true), 404);
+        abort_unless(UsuarioRol::puedeOperar($request->user()), 403);
         $permisoCrear = $naturaleza === 'ingreso' ? 'almacen.ingresos.create' : 'almacen.salidas.create';
         abort_unless($request->user()?->can($permisoCrear), 403);
 
@@ -381,6 +397,14 @@ class AlmacenMovimientoController extends Controller
         }
 
         $almacen = Almacen::query()->with('unidadMedida')->findOrFail($data['almacenid']);
+        abort_unless($this->almacenVisible($ctx['ambito'], (int) $almacen->almacenid, $user), 403, 'El almacén no pertenece a este módulo o no es suyo.');
+        if ($ctx['ambito'] === AlmacenAmbito::MAYORISTA) {
+            MayoristaAccess::asegurarPuedeGestionar($user, $almacen);
+        } elseif ($ctx['ambito'] === AlmacenAmbito::AGRICOLA) {
+            abort_unless(CampoAccess::puedeGestionarAlmacen($user, $almacen), 403);
+        } elseif ($ctx['ambito'] === AlmacenAmbito::PLANTA) {
+            abort_unless(PlantaAccess::puedeGestionarAlmacen($user, $almacen), 403);
+        }
         $insumo->loadMissing('unidadMedida');
 
         if ($tipo->naturaleza === 'ingreso') {
@@ -483,10 +507,11 @@ class AlmacenMovimientoController extends Controller
             'observaciones' => 'nullable|string|max:1000',
         ]);
 
-        $almacen = AlmacenAmbito::scope(Almacen::query(), $ctx['ambito'])
+        $almacen = $this->scopeAlmacenesVisibles(Almacen::query(), $ctx['ambito'], $request->user())
             ->where('almacenid', $data['almacenid'])
             ->where('activo', true)
             ->firstOrFail();
+        abort_unless(CampoAccess::puedeGestionarAlmacen($request->user(), $almacen), 403);
 
         $insumo = Insumo::query()->with(['tipo', 'unidadMedida'])->findOrFail($data['insumoid']);
 
@@ -588,7 +613,7 @@ class AlmacenMovimientoController extends Controller
 
         $base = AlmacenMovimiento::query()
             ->with(['almacen', 'insumo.unidadMedida', 'tipo'])
-            ->whereHas('almacen', fn ($a) => AlmacenAmbito::scope($a, $ambito))
+            ->whereHas('almacen', fn ($a) => $this->scopeAlmacenesVisibles($a, $ambito, $user))
             ->when($almacenId, fn ($q) => $q->where('almacenid', $almacenId))
             ->whereDate('fecha', '>=', $fechaDesde)
             ->whereDate('fecha', '<=', $fechaHasta);
@@ -609,7 +634,7 @@ class AlmacenMovimientoController extends Controller
 
         if ($ambito === AlmacenAmbito::AGRICOLA) {
             $cosechasQ = ProduccionAlmacenamiento::query()
-                ->whereHas('almacen', fn ($a) => AlmacenAmbito::scope($a, $ambito))
+                ->whereHas('almacen', fn ($a) => $this->scopeAlmacenesVisibles($a, $ambito, $user))
                 ->when($almacenId, fn ($q) => $q->where('almacenid', $almacenId))
                 ->whereDate('fechaentrada', '>=', $fechaDesde)
                 ->whereDate('fechaentrada', '<=', $fechaHasta);
@@ -634,12 +659,12 @@ class AlmacenMovimientoController extends Controller
             ->selectRaw('SUM(insumo.stock) as stock')
             ->join('almacen', 'insumo.almacenid', '=', 'almacen.almacenid')
             ->when($almacenId, fn ($q) => $q->where('insumo.almacenid', $almacenId))
-            ->whereHas('almacen', fn ($a) => AlmacenAmbito::scope($a, $ambito))
+            ->whereHas('almacen', fn ($a) => $this->scopeAlmacenesVisibles($a, $ambito, $user))
             ->groupBy('almacen.nombre')
             ->orderBy('almacen.nombre')
             ->get();
 
-        $almacenes = AlmacenAmbito::scope(Almacen::query(), $ambito)
+        $almacenes = $this->scopeAlmacenesVisibles(Almacen::query(), $ambito, $user)
             ->orderBy('nombre')
             ->get();
 
@@ -660,6 +685,24 @@ class AlmacenMovimientoController extends Controller
             'totalIngresos',
             'totalSalidas'
         ), $ctx));
+    }
+
+    /** El almacén pertenece al ámbito y al alcance del usuario. */
+    private function almacenVisible(string $ambito, int $almacenId, $user): bool
+    {
+        return $almacenId > 0 && $this->scopeAlmacenesVisibles(Almacen::query(), $ambito, $user)
+            ->whereKey($almacenId)
+            ->exists();
+    }
+
+    private function scopeAlmacenesVisibles(\Illuminate\Database\Eloquent\Builder $query, string $ambito, $user): \Illuminate\Database\Eloquent\Builder
+    {
+        return match ($ambito) {
+            AlmacenAmbito::AGRICOLA => CampoAccess::scopeAlmacenesAgricolas($query, $user),
+            AlmacenAmbito::PLANTA => PlantaAccess::scopeAlmacenesPlanta($query, $user),
+            AlmacenAmbito::MAYORISTA => MayoristaAccess::scopeAlmacenesMayorista($query, $user),
+            default => $query->whereRaw('1 = 0'),
+        };
     }
 
     /**

@@ -19,8 +19,11 @@ class ActionPermissionMiddleware
             abort(401);
         }
 
-        if (UsuarioRol::esAdminGlobal($user)) {
-            return $next($request);
+        // El admin no tiene bypass: se evalúa con sus permisos de la matriz (supervisión).
+        // Además, una ruta de escritura protegida solo con permiso de lectura es un flujo
+        // operativo (completar actividad, registrar movimiento, etc.): el admin no la ejecuta.
+        if ($action === 'read' && ! $request->isMethodSafe() && UsuarioRol::esAdminGlobal($user)) {
+            abort(403, 'El administrador tiene acceso de supervisión: no ejecuta operaciones de este módulo.');
         }
 
         $permission = config("permission_matrix.modules.{$module}.{$action}");

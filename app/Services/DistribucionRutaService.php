@@ -357,39 +357,20 @@ class DistribucionRutaService
         return true;
     }
 
+    /** Pool mayorista (MAY-17): sin ámbito por defecto, solo perfiles de flota mayorista explícita. */
     public function asegurarTransportistaMayorista(int $transportistaId): void
     {
-        $usuario = \App\Models\Usuario::query()
-            ->with('perfilTransportista')
-            ->where('usuarioid', $transportistaId)
-            ->where('role', 'transportista')
-            ->first();
-
-        if ($usuario === null) {
-            throw new InvalidArgumentException('Transportista no válido.');
-        }
-
-        $ambito = $usuario->perfilTransportista?->ambito_flota ?? TransportistaFlotaCatalogo::AGRICOLA;
-        if ($ambito !== TransportistaFlotaCatalogo::MAYORISTA) {
-            throw new InvalidArgumentException('Seleccione un transportista de flota mayorista.');
-        }
+        \App\Support\TransportistaPool::asegurarAsignable(
+            \App\Models\Usuario::query()->find($transportistaId),
+            TransportistaFlotaCatalogo::MAYORISTA
+        );
     }
 
     public function asegurarTransportistaPlanta(int $transportistaId): void
     {
-        $usuario = \App\Models\Usuario::query()
-            ->with('perfilTransportista')
-            ->where('usuarioid', $transportistaId)
-            ->where('role', 'transportista')
-            ->first();
-
-        if ($usuario === null) {
-            throw new InvalidArgumentException('Transportista no válido.');
-        }
-
-        $ambito = $usuario->perfilTransportista?->ambito_flota ?? TransportistaFlotaCatalogo::AGRICOLA;
-        if ($ambito !== TransportistaFlotaCatalogo::PLANTA) {
-            throw new InvalidArgumentException('Seleccione un transportista de flota planta.');
-        }
+        \App\Support\TransportistaPool::asegurarAsignable(
+            \App\Models\Usuario::query()->find($transportistaId),
+            TransportistaFlotaCatalogo::PLANTA
+        );
     }
 }

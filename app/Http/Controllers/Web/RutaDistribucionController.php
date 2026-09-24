@@ -12,6 +12,7 @@ use App\Support\RutaDistribucionCatalogo;
 use App\Support\RutaPorCallesService;
 use App\Support\UbicacionGpsParser;
 use App\Support\UsuarioRol;
+use App\Support\ViajeAcceso;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -29,18 +30,8 @@ class RutaDistribucionController extends Controller
 
     private function autorizarVerRuta(RutaDistribucion $ruta): void
     {
-        $user = auth()->user();
-        if (UsuarioRol::puedePlanificarDistribucion($user)) {
-            return;
-        }
-        if (UsuarioRol::puedeGestionarDistribucionMayorista($user)) {
-            return;
-        }
-        if (UsuarioRol::esTransportista($user) && (int) $ruta->transportista_usuarioid === (int) $user->usuarioid) {
-            return;
-        }
-
-        abort(403);
+        // El admin supervisa todas; el mayorista solo las de su almacén y el conductor solo las suyas.
+        abort_unless(ViajeAcceso::puedeVerRutaDistribucion(auth()->user(), $ruta), 403);
     }
 
     public function index(Request $request): View

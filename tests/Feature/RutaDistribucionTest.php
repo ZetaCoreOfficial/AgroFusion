@@ -12,6 +12,7 @@ use App\Models\Usuario;
 use App\Models\TipoInsumo;
 use App\Models\UnidadMedida;
 use App\Models\Vehiculo;
+use App\Services\DistribucionRutaService;
 use App\Support\AlmacenAmbito;
 use App\Support\PedidoDistribucionCatalogo;
 use App\Support\TransportistaFlotaCatalogo;
@@ -46,19 +47,19 @@ class RutaDistribucionTest extends TestCase
         return $user;
     }
 
-    public function test_admin_puede_ver_planificacion_distribucion(): void
+    public function test_admin_supervisor_no_planifica_distribucion(): void
     {
         $user = $this->usuarioAdmin();
         $this->actingAs($user);
 
-        $this->get(route('punto-venta.rutas.index'))->assertOk();
-        $this->get(route('punto-venta.rutas.create'))->assertOk();
+        $this->get(route('punto-venta.rutas.index'))->assertForbidden();
+        $this->get(route('punto-venta.rutas.create'))->assertForbidden();
+        $this->post(route('punto-venta.rutas.store'), [])->assertForbidden();
     }
 
-    public function test_crea_ruta_con_pedidos_confirmados(): void
+    public function test_servicio_crea_ruta_con_pedidos_confirmados(): void
     {
         $user = $this->usuarioAdmin();
-        $this->actingAs($user);
 
         $unidad = UnidadMedida::create(['nombre' => 'Kilogramo', 'abreviatura' => 'kg']);
 
@@ -96,6 +97,8 @@ class RutaDistribucionTest extends TestCase
             'marca' => 'Toyota',
             'modelo' => 'Hilux',
             'activo' => true,
+            // Conductor y vehículo de la misma flota (TRA-04).
+            'ambito_flota' => TransportistaFlotaCatalogo::MAYORISTA,
         ]);
 
         PerfilTransportista::create([
@@ -153,15 +156,25 @@ class RutaDistribucionTest extends TestCase
             'cantidad' => 10,
         ]);
 
-        $response = $this->post(route('punto-venta.rutas.store'), [
+        // El admin ya no planifica por HTTP; se valida el servicio de dominio directamente.
+        $this->actingAs($user)->post(route('punto-venta.rutas.store'), [
             'almacen_mayorista_origenid' => $almacenMayorista->almacenid,
             'transportista_usuarioid' => $chofer->usuarioid,
             'vehiculoid' => $vehiculo->vehiculoid,
             'costo_bs' => 250.50,
             'pedidos' => [$pedido->pedidodistribucionid],
-        ]);
+        ])->assertForbidden();
 
-        $response->assertRedirect();
+        app(DistribucionRutaService::class)->crear(
+            $almacenMayorista,
+            [$pedido->pedidodistribucionid],
+            (int) $chofer->usuarioid,
+            (int) $vehiculo->vehiculoid,
+            (int) $minorista->usuarioid,
+            null,
+            250.50
+        );
+
         $pedido->refresh();
         $this->assertNotNull($pedido->rutadistribucionid);
         $ruta = \App\Models\RutaDistribucion::query()->find($pedido->rutadistribucionid);

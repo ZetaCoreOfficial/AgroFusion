@@ -17,16 +17,9 @@ final class EnvioTrayectoCatalogo
     /** @return list<string> */
     public static function trayectosPermitidos(?Usuario $user): array
     {
-        if (! $user) {
+        // El admin supervisa: no registra envíos en ningún trayecto.
+        if (! UsuarioRol::puedeOperar($user)) {
             return [];
-        }
-
-        if (UsuarioRol::esAdminGlobal($user)) {
-            return [
-                self::TRAYECTO_PLANTA,
-                self::TRAYECTO_MAYORISTA,
-                self::TRAYECTO_PDV,
-            ];
         }
 
         if (UsuarioRol::esJefeAgricultor($user)) {
@@ -101,16 +94,13 @@ final class EnvioTrayectoCatalogo
 
     public static function puedeRegistrarStorePdv(Request $request, ?Usuario $user): bool
     {
-        if ($user === null) {
+        // El admin no crea pedidos (ni como minorista ni como mayorista): evita crear y aceptar el mismo pedido.
+        if (! UsuarioRol::puedeOperar($user)) {
             return false;
         }
 
-        if (UsuarioRol::esMinorista($user) && ! UsuarioRol::esAdminGlobal($user)) {
+        if (UsuarioRol::esMinorista($user)) {
             return ! PedidoDistribucionVista::esBandejaMayorista($request, $user);
-        }
-
-        if (UsuarioRol::esAdminGlobal($user)) {
-            return $request->query('ctx') !== 'mayorista';
         }
 
         if (UsuarioRol::esMayorista($user) && ! UsuarioRol::esMinorista($user)) {
@@ -125,17 +115,6 @@ final class EnvioTrayectoCatalogo
     {
         if ($user === null) {
             throw new InvalidArgumentException('Usuario no autenticado.');
-        }
-
-        if (UsuarioRol::esAdminGlobal($user)) {
-            if ($almacenId === null || $almacenId <= 0) {
-                throw new InvalidArgumentException('Seleccione el almacén mayorista de origen.');
-            }
-
-            $almacen = \App\Models\Almacen::query()->findOrFail($almacenId);
-            MayoristaAccess::asegurarPuedeGestionar($user, $almacen);
-
-            return $almacenId;
         }
 
         if (! UsuarioRol::esMayorista($user)) {

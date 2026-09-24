@@ -148,7 +148,7 @@ class RutaTiempoRealController extends Controller
             return back()->with('warning', $e->getMessage());
         }
 
-        $mensaje = 'Recorrido marcado como completado correctamente.';
+        $mensaje = 'Seguimiento GPS cerrado. El transportista debe confirmar la llegada y completar el cierre con firmas.';
 
         if (request()->expectsJson()) {
             return response()->json([
@@ -249,9 +249,9 @@ class RutaTiempoRealController extends Controller
     {
         $user = auth()->user();
 
-        return $user && (
-            UsuarioRol::esAdminGlobal($user)
-            || UsuarioRol::esJefePlanta($user)
+        // El admin supervisa el mapa en tiempo real pero no cierra envíos.
+        return UsuarioRol::puedeOperar($user) && (
+            UsuarioRol::esJefePlanta($user)
             || UsuarioRol::esJefeAgricultor($user)
             || ($user->can('asignaciones.update') && ! UsuarioRol::esTransportista($user))
         );
@@ -310,12 +310,12 @@ class RutaTiempoRealController extends Controller
             ->findOrFail($id);
 
         if (SimulacionRutaCatalogo::simulacionActivaAgricola($envio)) {
-            $estado = $this->simulacion->estadoAgricola($envio, false);
+            $estado = $this->simulacion->estadoAgricola($envio);
             $envio->refresh();
         } elseif (! EnvioAsignacionEstadoCatalogo::llegoADestino($envio)) {
             abort(404, 'La simulación de este envío ya no está activa.');
         } else {
-            $estado = $this->simulacion->estadoAgricola($envio, false);
+            $estado = $this->simulacion->estadoAgricola($envio);
         }
 
         $trayecto = \App\Support\EnvioPedidoService::trayectoTexto($envio);
@@ -336,12 +336,12 @@ class RutaTiempoRealController extends Controller
             ->findOrFail($id);
 
         if (SimulacionRutaCatalogo::simulacionActivaDistribucion($ruta)) {
-            $estado = $this->simulacion->estadoDistribucion($ruta, false);
+            $estado = $this->simulacion->estadoDistribucion($ruta);
             $ruta->refresh();
         } elseif ($ruta->estado !== RutaDistribucionCatalogo::ESTADO_COMPLETADA) {
             abort(404, 'La simulación de esta ruta ya no está activa.');
         } else {
-            $estado = $this->simulacion->estadoDistribucion($ruta, false);
+            $estado = $this->simulacion->estadoDistribucion($ruta);
         }
 
         $trayecto = app(\App\Services\DistribucionRutaService::class)->trayectoTexto($ruta);
@@ -359,12 +359,12 @@ class RutaTiempoRealController extends Controller
         abort_unless(RutaDistribucionCatalogo::esTrasladoPlantaMayorista($ruta), 404);
 
         if (SimulacionRutaCatalogo::simulacionActivaDistribucion($ruta)) {
-            $estado = $this->simulacion->estadoDistribucion($ruta, false);
+            $estado = $this->simulacion->estadoDistribucion($ruta);
             $ruta->refresh();
         } elseif ($ruta->estado !== RutaDistribucionCatalogo::ESTADO_COMPLETADA) {
             abort(404, 'La simulación de este traslado ya no está activa.');
         } else {
-            $estado = $this->simulacion->estadoDistribucion($ruta, false);
+            $estado = $this->simulacion->estadoDistribucion($ruta);
         }
 
         $trayecto = app(\App\Services\TrasladoPlantaMayoristaService::class)->trayectoTexto($ruta);

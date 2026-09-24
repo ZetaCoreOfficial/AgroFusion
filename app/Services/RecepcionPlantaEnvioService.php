@@ -201,6 +201,21 @@ class RecepcionPlantaEnvioService
         });
     }
 
+    public function puedeRecibirPedido(Pedido $pedido, Usuario $usuario): bool
+    {
+        if (! UsuarioRol::puedeConfirmarRecepcionPlanta($usuario)) {
+            return false;
+        }
+
+        try {
+            $almacen = $this->resolverAlmacenPlantaDesdePedido($pedido);
+        } catch (\InvalidArgumentException) {
+            return false;
+        }
+
+        return PlantaAccess::puedeGestionarAlmacen($usuario, $almacen);
+    }
+
     private function resolverAlmacenPlantaDesdePedido(Pedido $pedido): Almacen
     {
         $texto = (string) ($pedido->direccion_texto ?? '');

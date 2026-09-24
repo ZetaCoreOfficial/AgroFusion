@@ -43,6 +43,9 @@ final class DocumentoEntregaTransportista
             ->whereNotNull('pedidoid')
             ->pluck('pedidoid');
 
+        // Rutas planta → mayorista y mayorista → PDV del conductor (TRA-13): sus guías usan el código de ruta.
+        $externoIds = $externoIds->merge(self::codigosRutasDelConductor($usuarioid))->unique()->values();
+
         return $query->where(function (Builder $w) use ($usuarioid, $externoIds, $pedidoIds) {
             $w->where('usuarioid', $usuarioid);
             if ($externoIds->isNotEmpty()) {
@@ -54,9 +57,24 @@ final class DocumentoEntregaTransportista
         });
     }
 
+    /** @return \Illuminate\Support\Collection<int, string> */
+    private static function codigosRutasDelConductor(int $usuarioid): \Illuminate\Support\Collection
+    {
+        return \App\Models\RutaDistribucion::query()
+            ->where('transportista_usuarioid', $usuarioid)
+            ->whereNotNull('codigo')
+            ->pluck('codigo')
+            ->map(fn ($c) => (string) $c);
+    }
+
     public static function puedeVerDocumento(DocumentoEntrega $documento, int $usuarioid): bool
     {
         if ((int) $documento->usuarioid === $usuarioid) {
+            return true;
+        }
+
+        $codigo = (string) ($documento->externo_envio_id ?? '');
+        if ($codigo !== '' && self::codigosRutasDelConductor($usuarioid)->contains($codigo)) {
             return true;
         }
 

@@ -133,8 +133,7 @@ final class SimulacionRutaCatalogo
             return false;
         }
 
-        return (int) $envio->transportista_usuarioid === (int) $user->usuarioid
-            || $user->can('asignaciones.update');
+        return ViajeAcceso::esConductorAsignado($user, $envio->transportista_usuarioid);
     }
 
     /** El transportista asignado no ve su propia ruta en tiempo real; solo supervisores. */
@@ -161,8 +160,8 @@ final class SimulacionRutaCatalogo
             return false;
         }
 
-        return (int) $ruta->transportista_usuarioid === (int) $user->usuarioid
-            || UsuarioRol::puedeGestionarDistribucionPlanta($user)
-            || $user->can('asignaciones.update');
+        // El mayorista despacha y designa transporte, pero no conduce (MAY-16): el botón
+        // «Empezar ruta» solo aparece al conductor asignado, igual que la regla del backend.
+        return ViajeAcceso::esConductorAsignado($user, $ruta->transportista_usuarioid);
     }
 }

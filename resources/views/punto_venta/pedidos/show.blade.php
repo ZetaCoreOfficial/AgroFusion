@@ -409,7 +409,8 @@
         $esAdmin = $esAdmin ?? false;
         $puedeVerRutaTiempoReal = $puedeVerRutaTiempoReal ?? false;
         $urlTiempoRealPedido = $urlTiempoRealPedido ?? null;
-        $puedeOperarSalidaRuta = ($esAdmin ?? false) || ($esTransportistaAsignado ?? false);
+        // Solo el transportista asignado opera la salida en ruta (el admin supervisa).
+        $puedeOperarSalidaRuta = ($esTransportistaAsignado ?? false);
         $urlUbicacionPdv = $pedido->puntoVenta
             ? route('punto-venta.pedidos.ubicacion.pdv', $pedido)
             : null;
@@ -711,7 +712,13 @@
                         </div>
                         <div class="pdv-meta-list">
                             <div class="pdv-meta-item"><span>Fecha solicitud</span><span>{{ $pedido->fechapedido?->format('d/m/Y H:i') ?? '—' }}</span></div>
-                            @if($pedido->creadoPor)
+                            @if(\App\Support\PedidoDistribucionCatalogo::esPedidoExterno($pedido))
+                            <div class="pdv-meta-item"><span>Origen</span><span><span class="badge badge-warning">Pedido externo</span> {{ \App\Support\PedidoDistribucionCatalogo::etiquetaCanal($pedido->canal_origen) }}</span></div>
+                            @php $registrador = $pedido->registradoManualPor ?? $pedido->creadoPor; @endphp
+                            @if($registrador)
+                            <div class="pdv-meta-item"><span>Registrado por (mayorista)</span><span>{{ trim($registrador->nombre.' '.$registrador->apellido) }}</span></div>
+                            @endif
+                            @elseif($pedido->creadoPor)
                             <div class="pdv-meta-item"><span>Solicitado por</span><span>{{ trim($pedido->creadoPor->nombre.' '.$pedido->creadoPor->apellido) }}</span></div>
                             @endif
                             @if($pedido->fecha_entrega_deseada)

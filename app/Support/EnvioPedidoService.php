@@ -145,6 +145,9 @@ final class EnvioPedidoService
             throw new InvalidArgumentException('El vehículo seleccionado no está disponible.');
         }
 
+        // Pool agrícola explícito (TRA-04): perfil de flota agrícola, disponible y sin viaje en curso.
+        TransportistaPool::asegurarAsignable($transportista, TransportistaFlotaCatalogo::AGRICOLA);
+
         $capacidad = app(TransporteCapacidadService::class);
         $capacidad->validarAsignacion($transportista, $vehiculo);
         $capacidad->validarCarga($vehiculo, $capacidad->pesoPedido($pedido->loadMissing('detalles')));

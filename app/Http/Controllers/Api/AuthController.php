@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Usuario;
+use App\Support\CuentaEstado;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -11,7 +12,7 @@ class AuthController extends Controller
 {
     /**
      * =====================================================
-     *  REGISTER (MÓVIL) — Rol = Agricultor
+     *  REGISTER (MÓVIL) — Rol = agricultor, cuenta pendiente de aprobación
      * =====================================================
      */
     public function register(Request $request)
@@ -41,62 +42,22 @@ class AuthController extends Controller
 
         $usuario->informacionadicional = $request->input('informacionadicional');
         $usuario->activo = true;
+        $usuario->role = 'agricultor';
+        // Igual que el registro web: la cuenta queda pendiente hasta que un administrador la apruebe.
+        $usuario->estado_cuenta = CuentaEstado::PENDIENTE;
 
         $usuario->save();
 
-        // 👇 Rol Agricultor
-        $usuario->assignRole('Agricultor');
-
-        $token = $usuario->createToken('mobile')->plainTextToken;
+        $usuario->assignRole('agricultor');
 
         return response()->json([
+            'message' => 'Solicitud registrada. La cuenta queda pendiente de aprobación.',
             'user' => $usuario->load('roles'),
-            'token' => $token,
         ], 201);
     }
 
 
 
-    /**
-     * =====================================================
-     *  REGISTER ADMIN (WEB) — Rol = Administrador
-     *  Solo debería usarse desde el panel web protegido.
-     * =====================================================
-     */
-    public function registerAdmin(Request $request)
-    {
-        $data = $request->validate([
-            'nombre' => 'required|string|max:100',
-            'apellido' => 'required|string|max:100',
-            'email' => 'required|email|max:100|unique:usuario,email',
-            'nombreusuario' => 'required|string|max:100|unique:usuario,nombreusuario',
-            'telefono' => 'nullable|string|max:20',
-            'password' => 'required|string|min:6',
-            'imagenurl' => 'nullable|string|max:250',
-            'informacionadicional' => 'nullable|string',
-        ]);
-
-        $usuario = new Usuario();
-        $usuario->nombre = $data['nombre'];
-        $usuario->apellido = $data['apellido'];
-        $usuario->email = $data['email'];
-        $usuario->nombreusuario = $data['nombreusuario'];
-        $usuario->telefono = $data['telefono'] ?? null;
-        $usuario->passwordhash = Hash::make($data['password']);
-        $usuario->imagenurl = $request->input('imagenurl');
-        $usuario->informacionadicional = $request->input('informacionadicional');
-        $usuario->activo = true;
-
-        $usuario->save();
-
-        // 👇 Rol Administrador
-        $usuario->assignRole('Admin');
-
-        return response()->json([
-            'message' => 'Administrador creado correctamente',
-            'user' => $usuario->load('roles')
-        ], 201);
-    }
     /**
      * LOGIN
      */
@@ -115,6 +76,14 @@ class AuthController extends Controller
             return response()->json([
                 'message' => 'Credenciales incorrectas'
             ], 401);
+        }
+
+        if (! CuentaEstado::puedeIniciarSesion($usuario->estado_cuenta ?? CuentaEstado::APROBADO, (bool) $usuario->activo)) {
+            return response()->json([
+                'message' => CuentaEstado::esPendiente($usuario->estado_cuenta)
+                    ? 'Tu cuenta está pendiente de aprobación por un administrador.'
+                    : 'Tu cuenta no está activa.',
+            ], 403);
         }
 
         $token = $usuario->createToken('mobile')->plainTextToken;

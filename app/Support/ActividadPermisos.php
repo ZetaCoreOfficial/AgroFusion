@@ -36,7 +36,7 @@ final class ActividadPermisos
                 || (int) ($actividad->usuarioid_ejecutor ?? 0) === $uid;
         }
 
-        return true;
+        return false;
     }
 
     /**
@@ -63,12 +63,15 @@ final class ActividadPermisos
                 'lote',
                 fn (Builder $q) => $q->whereIn('usuarioid', UsuarioRol::idsUsuariosBajoJefeAgricultor($user))
             );
+        } elseif (! UsuarioRol::esAdminGlobal($user)) {
+            $query->whereRaw('1 = 0');
         }
     }
 
     public static function puedeMarcarCompletada(?Usuario $user, Actividad $actividad): bool
     {
-        if (! $user || $actividad->fechafin !== null) {
+        // El admin supervisa actividades pero no las completa en nombre de otros.
+        if (! UsuarioRol::puedeOperar($user) || $actividad->fechafin !== null) {
             return false;
         }
 
@@ -78,10 +81,6 @@ final class ActividadPermisos
         }
 
         // AGR-05: el jefe supervisa; no ejecuta/completa tareas del operario.
-        if (UsuarioRol::esAdminGlobal($user)) {
-            return true;
-        }
-
         if (UsuarioRol::esJefeAgricultor($user)) {
             return false;
         }
@@ -93,6 +92,6 @@ final class ActividadPermisos
                 || (int) ($actividad->usuarioid_ejecutor ?? 0) === $uid;
         }
 
-        return $user->can('lotes.update');
+        return false;
     }
 }

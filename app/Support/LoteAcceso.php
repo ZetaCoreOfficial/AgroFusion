@@ -61,18 +61,15 @@ final class LoteAcceso
         return self::participoEnLote($user, $lote);
     }
 
-    /** Encargado del lote o personal con gestión de campo (jefe/admin). */
+    /** Encargado del lote o jefe agrícola de su equipo (el admin solo supervisa). */
     public static function puedeGestionar(?Usuario $user, Lote $lote): bool
     {
-        if (! $user) {
+        // El admin consulta lotes pero no los gestiona.
+        if (! UsuarioRol::puedeOperar($user)) {
             return false;
         }
 
         if (UsuarioRol::gestionaCampo($user)) {
-            if (UsuarioRol::esAdminGlobal($user)) {
-                return true;
-            }
-
             if (UsuarioRol::esJefeAgricultor($user)) {
                 return in_array(
                     (int) $lote->usuarioid,

@@ -16,9 +16,11 @@ use App\Models\Usuario;
 use App\Support\DocumentoEntregaArchivo;
 use App\Support\EnvioAsignacionEstadoCatalogo;
 use App\Support\EnvioCierreAgricolaCatalogo;
+use App\Support\FirmaCierreReglas;
 use App\Support\PedidoCatalogo;
 use App\Support\SimulacionRutaCatalogo;
 use App\Support\UsuarioRol;
+use App\Support\ViajeAcceso;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -26,6 +28,7 @@ class CierreEnvioAgricolaService
 {
     public function __construct(
         private readonly SimulacionRutaService $simulacion,
+        private readonly RecepcionPlantaEnvioService $recepcionPlanta,
     ) {}
 
     public function tieneCondicionesVehiculo(EnvioAsignacionMultiple $envio): bool
@@ -49,7 +52,7 @@ class CierreEnvioAgricolaService
             'firmaRecepcion',
         ]);
 
-        $estadoSim = $this->simulacion->estadoAgricola($envio, false);
+        $estadoSim = $this->simulacion->estadoAgricola($envio);
         $progreso = (float) ($estadoSim['progreso'] ?? 0);
         $enRuta = SimulacionRutaCatalogo::simulacionActivaAgricola($envio);
         $llegadaConfirmada = $envio->llegada_confirmada_at !== null;
@@ -57,7 +60,8 @@ class CierreEnvioAgricolaService
         $tieneCondiciones = $this->tieneCondicionesVehiculo($envio);
         $tieneIncidentes = $envio->checklistIncidente !== null;
         $firmaTransportista = $envio->firmaTransportista !== null;
-        $firmaRecepcion = $envio->firmaRecepcion !== null;
+        // Solo cuenta la recepción firmada por planta con su cuenta (CROSS-A).
+        $firmaRecepcion = FirmaCierreReglas::recepcionValida($envio->firmaRecepcion, $envio->transportista_usuarioid);
         $pedidoConfirmado = PedidoCatalogo::envioOperativoParaTransportista($envio);
 
         $pasoActual = EnvioCierreAgricolaCatalogo::PASO_CONDICIONES;
@@ -186,7 +190,7 @@ class CierreEnvioAgricolaService
             throw new InvalidArgumentException('El envío debe estar en ruta para confirmar la llegada.');
         }
 
-        $estado = $this->simulacion->estadoAgricola($envio, false);
+        $estado = $this->simulacion->estadoAgricola($envio);
         if ((float) ($estado['progreso'] ?? 0) < 100) {
             throw new InvalidArgumentException('Primero debe llegar al destino. Espere a que el recorrido GPS llegue al 100% antes de confirmar la llegada.');
         }
@@ -260,19 +264,25 @@ class CierreEnvioAgricolaService
 
     public function guardarFirmaTransportista(EnvioAsignacionMultiple $envio, Usuario $usuario, string $imagenBase64): FirmaTransportistaEnvio
     {
-        $this->autorizarFirmaTransportista($usuario, $envio);
+        FirmaCierreReglas::asegurarPuedeFirmarComoTransportista($usuario, $envio->transportista_usuarioid);
         $this->validarPreFirmas($envio);
+        $imagen = $this->normalizarImagenFirma($imagenBase64);
 
-        if ($envio->firmaTransportista()->exists()) {
-            throw new InvalidArgumentException('La firma del transportista ya fue registrada.');
-        }
+        $firma = DB::transaction(function () use ($envio, $usuario, $imagen) {
+            EnvioAsignacionMultiple::query()->whereKey($envio->envioasignacionmultipleid)->lockForUpdate()->first();
 
-        $firma = FirmaTransportistaEnvio::create([
-            'envioasignacionmultipleid' => $envio->envioasignacionmultipleid,
-            'imagenfirma' => $this->normalizarImagenFirma($imagenBase64),
-            'nombrefirmante' => RecepcionQrFirmaService::nombreDesdeUsuario($usuario),
-            'fechafirma' => now(),
-        ]);
+            if ($envio->firmaTransportista()->exists()) {
+                throw new InvalidArgumentException('La firma del transportista ya fue registrada.');
+            }
+
+            return FirmaTransportistaEnvio::create([
+                'envioasignacionmultipleid' => $envio->envioasignacionmultipleid,
+                'imagenfirma' => $imagen,
+                'nombrefirmante' => RecepcionQrFirmaService::nombreDesdeUsuario($usuario),
+                'firmante_usuarioid' => $usuario->usuarioid,
+                'fechafirma' => now(),
+            ]);
+        });
 
         app(RecepcionQrFirmaService::class)->ensureToken($envio);
 
@@ -281,18 +291,56 @@ class CierreEnvioAgricolaService
 
     public function guardarFirmaRecepcion(EnvioAsignacionMultiple $envio, Usuario $usuario, string $imagenBase64): FirmaRecepcionEnvio
     {
-        $this->autorizarFirmaRecepcion($usuario, $envio);
+        FirmaCierreReglas::asegurarPuedeFirmarRecepcion(
+            $usuario,
+            $envio->transportista_usuarioid,
+            $this->esReceptor($usuario, $envio),
+            'No tiene permiso para firmar la recepción en planta.',
+        );
         $this->validarPreFirmas($envio);
+        $imagen = $this->normalizarImagenFirma($imagenBase64);
 
-        if ($envio->firmaRecepcion()->exists()) {
-            throw new InvalidArgumentException('La firma de recepción ya fue registrada.');
+        return DB::transaction(function () use ($envio, $usuario, $imagen) {
+            EnvioAsignacionMultiple::query()->whereKey($envio->envioasignacionmultipleid)->lockForUpdate()->first();
+
+            if (! $envio->firmaTransportista()->exists()) {
+                throw new InvalidArgumentException('Primero debe firmar el transportista la entrega.');
+            }
+
+            $existente = $envio->firmaRecepcion()->first();
+            if (FirmaCierreReglas::recepcionValida($existente, $envio->transportista_usuarioid)) {
+                throw new InvalidArgumentException('La firma de recepción ya fue registrada.');
+            }
+
+            $datos = [
+                'imagenfirma' => $imagen,
+                'nombrefirmante' => RecepcionQrFirmaService::nombreDesdeUsuario($usuario),
+                'firmante_usuarioid' => $usuario->usuarioid,
+                'fechafirma' => now(),
+            ];
+
+            // Una firma anónima previa (QR sin sesión) se reemplaza por la del receptor autenticado.
+            if ($existente !== null) {
+                $existente->update($datos);
+
+                return $existente->fresh();
+            }
+
+            return FirmaRecepcionEnvio::create(['envioasignacionmultipleid' => $envio->envioasignacionmultipleid] + $datos);
+        });
+    }
+
+    /** Solo el jefe de planta responsable del destino puede firmar la recepción. */
+    public function esReceptor(?Usuario $usuario, EnvioAsignacionMultiple $envio): bool
+    {
+        if ($usuario === null) {
+            return false;
         }
 
-        return FirmaRecepcionEnvio::create([
-            'envioasignacionmultipleid' => $envio->envioasignacionmultipleid,
-            'imagenfirma' => $this->normalizarImagenFirma($imagenBase64),
-            'fechafirma' => now(),
-        ]);
+        $envio->loadMissing('pedido');
+
+        return $envio->pedido !== null
+            && $this->recepcionPlanta->puedeRecibirPedido($envio->pedido, $usuario);
     }
 
     public function finalizarEntrega(EnvioAsignacionMultiple $envio, Usuario $usuario): DocumentoEntrega
@@ -329,7 +377,12 @@ class CierreEnvioAgricolaService
         }
 
         $documento = DB::transaction(function () use ($envio, $usuario) {
-            $envio->refresh();
+            EnvioAsignacionMultiple::query()->whereKey($envio->envioasignacionmultipleid)->lockForUpdate()->firstOrFail();
+            $envio->refresh()->load(['firmaTransportista', 'firmaRecepcion']);
+            FirmaCierreReglas::asegurarFirmasParaCierre($envio->firmaTransportista, $envio->firmaRecepcion, $envio->transportista_usuarioid);
+            if ($envio->fecha_recepcion_planta === null) {
+                throw new InvalidArgumentException('El jefe de planta debe confirmar el pesaje antes de finalizar la entrega.');
+            }
 
             return $this->generarDocumentoTransporte($envio, $usuario);
         });
@@ -357,29 +410,9 @@ class CierreEnvioAgricolaService
         throw new InvalidArgumentException('No tiene permiso para registrar incidentes en este envío.');
     }
 
-    private function autorizarFirmaTransportista(Usuario $usuario, EnvioAsignacionMultiple $envio): void
-    {
-        if (! $this->esTransportistaAsignado($usuario, $envio) && ! $this->esAdminOperativo($usuario)) {
-            throw new InvalidArgumentException('Solo el transportista asignado puede firmar como transportista.');
-        }
-    }
-
-    private function autorizarFirmaRecepcion(Usuario $usuario, EnvioAsignacionMultiple $envio): void
-    {
-        if (
-            $this->esAdminOperativo($usuario)
-            || $usuario->can('recepcion_planta.confirm')
-            || $this->esTransportistaAsignado($usuario, $envio)
-        ) {
-            return;
-        }
-
-        throw new InvalidArgumentException('No tiene permiso para firmar la recepción en planta.');
-    }
-
     private function autorizarFinalizar(Usuario $usuario, EnvioAsignacionMultiple $envio): void
     {
-        if ($this->esTransportistaAsignado($usuario, $envio) || $this->esAdminOperativo($usuario)) {
+        if (ViajeAcceso::esConductorAsignado($usuario, $envio->transportista_usuarioid) || $this->esAdminOperativo($usuario)) {
             return;
         }
 
@@ -417,9 +450,10 @@ class CierreEnvioAgricolaService
         return filter_var($valor, FILTER_VALIDATE_BOOLEAN);
     }
 
+    /** Coordinador logístico con permiso de asignaciones (el admin supervisor no opera cierres). */
     private function esAdminOperativo(Usuario $usuario): bool
     {
-        return UsuarioRol::esAdminGlobal($usuario) || $usuario->can('asignaciones.update');
+        return UsuarioRol::puedeOperar($usuario) && $usuario->can('asignaciones.update');
     }
 
     private function generarDocumentoTransporte(EnvioAsignacionMultiple $envio, Usuario $usuario): DocumentoEntrega

@@ -55,18 +55,49 @@ class PedidoDistribucionSalidaMayoristaService
         });
     }
 
+    /**
+     * La salida se identifica por la línea del pedido (MAY-19). Antes la clave era insumo + número de
+     * pedido: dos líneas del mismo producto con distinta presentación colisionaban y la segunda no se
+     * descontaba. Los movimientos históricos (sin línea) se reconocen por insumo, pedido y kg de la línea.
+     */
     public function yaDescontado(PedidoDistribucion $pedido, DetallePedidoDistribucion $detalle): bool
+    {
+        return $this->movimientoSalidaDeLinea($pedido, $detalle) !== null;
+    }
+
+    private function movimientoSalidaDeLinea(PedidoDistribucion $pedido, DetallePedidoDistribucion $detalle): ?AlmacenMovimiento
     {
         $insumoId = (int) $detalle->insumoid;
         if ($insumoId <= 0) {
-            return false;
+            return null;
         }
 
+        $porLinea = AlmacenMovimiento::query()
+            ->where('detallepedidodistribucionid', $detalle->detallepedidodistribucionid)
+            ->first();
+        if ($porLinea !== null) {
+            return $porLinea;
+        }
+
+        $kgLinea = $this->kgLinea($detalle);
+
         return AlmacenMovimiento::query()
+            ->whereNull('detallepedidodistribucionid')
             ->where('insumoid', $insumoId)
             ->where('referencia', $pedido->numero_solicitud)
             ->where('observaciones', 'like', '%Distribución PDV — salida mayorista%')
-            ->exists();
+            ->whereBetween('cantidad', [$kgLinea - 0.001, $kgLinea + 0.001])
+            ->first();
+    }
+
+    private function kgLinea(DetallePedidoDistribucion $detalle): float
+    {
+        $detalle->loadMissing('presentacion');
+        $unidades = (float) $detalle->cantidad;
+
+        return $detalle->presentacion
+            ? round($unidades * $detalle->presentacion->pesoNetoKg(), 4)
+            : $unidades;
     }
 
     public function descontarDetalle(
@@ -95,6 +126,15 @@ class PedidoDistribucionSalidaMayoristaService
         $almacenOrigenId = (int) ($detalle->almacen_mayorista_origenid ?? $insumoOrigen->almacenid);
         if ($almacenOrigenId <= 0) {
             throw new InvalidArgumentException('No se pudo determinar el almacén mayorista de origen.');
+        }
+
+        // Lock del producto de origen: la revalidación de stock y el descuento no compiten con otra salida.
+        $insumoOrigen = \App\Models\Insumo::query()->whereKey($insumoOrigen->insumoid)->lockForUpdate()->firstOrFail();
+        if ($detalle->inventario_presentacion_loteid) {
+            $detalle->setRelation(
+                'inventarioPresentacionLote',
+                \App\Models\InventarioPresentacionLote::query()->whereKey($detalle->inventario_presentacion_loteid)->lockForUpdate()->first()
+            );
         }
 
         $this->validarStockDisponible($detalle, $insumoOrigen, $almacenOrigenId, $presentacion, $cantidadUnidades, $kgMovimiento);
@@ -137,66 +177,11 @@ class PedidoDistribucionSalidaMayoristaService
             'referencia' => $ref,
             'destino_motivo' => $destinoMotivo ?? 'Punto de venta',
             'observaciones' => '[Distribución PDV — salida mayorista] '.$ref.' · '.$obsUnidades,
+            'detallepedidodistribucionid' => $detalle->detallepedidodistribucionid,
         ]);
 
         if ($presentacion !== null) {
             $this->inventarioPresentacion->sincronizarStockAgregadoInsumo((int) $insumoOrigen->insumoid);
-        }
-    }
-
-    /**
-     * Corrige envíos cuyo movimiento de salida existe pero el inventario por presentación no se descontó.
-     */
-    public function reconciliarSalidasPendientesAlmacen(Almacen $almacen, Usuario $usuario): void
-    {
-        if (($almacen->ambito ?? '') !== \App\Support\AlmacenAmbito::MAYORISTA) {
-            return;
-        }
-
-        $estadosConSalida = [
-            \App\Support\PedidoDistribucionCatalogo::ESTADO_EN_TRANSITO,
-            \App\Support\PedidoDistribucionCatalogo::ESTADO_RECIBIDO,
-            \App\Support\PedidoDistribucionCatalogo::ESTADO_CONFIRMADO,
-        ];
-
-        $pedidos = PedidoDistribucion::query()
-            ->whereIn('estado', $estadosConSalida)
-            ->where(function ($q) use ($almacen) {
-                $q->where('almacen_mayorista_origenid', $almacen->almacenid)
-                    ->orWhereHas('detalles', fn ($d) => $d->where('almacen_mayorista_origenid', $almacen->almacenid));
-            })
-            ->with([
-                'detalles.insumo.unidadMedida',
-                'detalles.presentacion.tipoEmpaque',
-                'detalles.inventarioPresentacionLote',
-                'puntoVenta.almacen',
-            ])
-            ->orderByDesc('pedidodistribucionid')
-            ->get();
-
-        foreach ($pedidos as $pedido) {
-            $destino = $pedido->puntoVenta?->almacen?->nombre
-                ?? $pedido->puntoVenta?->nombre
-                ?? 'Punto de venta';
-
-            foreach ($pedido->detalles as $detalle) {
-                $almacenDetalle = (int) ($detalle->almacen_mayorista_origenid ?? $pedido->almacen_mayorista_origenid ?? 0);
-                if ($almacenDetalle !== (int) $almacen->almacenid) {
-                    continue;
-                }
-
-                if ($this->yaDescontado($pedido, $detalle)) {
-                    $this->descontarSoloInventarioSiPendiente($detalle, $pedido);
-
-                    continue;
-                }
-
-                try {
-                    $this->descontarDetalle($detalle, $pedido, $usuario, null, $destino);
-                } catch (InvalidArgumentException) {
-                    // Si el stock ya no alcanza, no bloquear la vista del almacén.
-                }
-            }
         }
     }
 
@@ -283,19 +268,9 @@ class PedidoDistribucionSalidaMayoristaService
         PedidoDistribucion $pedido,
         DetallePedidoDistribucion $detalle,
     ): ?float {
-        $almacenOrigenId = (int) ($detalle->almacen_mayorista_origenid ?? $detalle->insumo?->almacenid ?? 0);
-        if ($almacenOrigenId <= 0 || (int) $detalle->insumoid <= 0) {
-            return null;
-        }
+        $movimiento = $this->movimientoSalidaDeLinea($pedido, $detalle);
 
-        $kg = AlmacenMovimiento::query()
-            ->where('insumoid', (int) $detalle->insumoid)
-            ->where('almacenid', $almacenOrigenId)
-            ->where('referencia', $pedido->numero_solicitud)
-            ->where('observaciones', 'like', '%Distribución PDV — salida mayorista%')
-            ->value('cantidad');
-
-        return $kg !== null ? (float) $kg : null;
+        return $movimiento !== null ? (float) $movimiento->cantidad : null;
     }
 
     private function kgInventarioParaDetalle(DetallePedidoDistribucion $detalle, int $almacenOrigenId): float

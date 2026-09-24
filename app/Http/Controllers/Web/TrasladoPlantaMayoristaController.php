@@ -256,9 +256,9 @@ class TrasladoPlantaMayoristaController extends Controller
     {
         $user = auth()->user();
 
-        return $user && (
-            UsuarioRol::esAdminGlobal($user)
-            || UsuarioRol::esJefePlanta($user)
+        // Gestión operativa del traslado (iniciar ruta, etc.): el admin solo supervisa.
+        return UsuarioRol::puedeOperar($user) && (
+            UsuarioRol::esJefePlanta($user)
             || $user->can('asignaciones.update')
         );
     }
@@ -277,7 +277,7 @@ class TrasladoPlantaMayoristaController extends Controller
     private function autorizarVer(RutaDistribucion $ruta): void
     {
         $user = auth()->user();
-        if ($this->puedeGestionarPlanta()) {
+        if ($this->puedeGestionarPlanta() || UsuarioRol::esAdminGlobal($user)) {
             return;
         }
         if (MayoristaAccess::puedeGestionarTraslado($user, $ruta)) {

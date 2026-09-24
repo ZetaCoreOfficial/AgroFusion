@@ -67,8 +67,7 @@ class SolicitudProduccionPlantaController extends Controller
         ]);
 
         $puedeGestionarPlanta = UsuarioRol::esPlantaOperativo(auth()->user())
-            || UsuarioRol::esJefePlanta(auth()->user())
-            || UsuarioRol::esAdminGlobal(auth()->user());
+            || UsuarioRol::esJefePlanta(auth()->user());
 
         return view('planta.solicitudes-produccion.show', [
             'solicitud' => $solicitud,
@@ -80,8 +79,7 @@ class SolicitudProduccionPlantaController extends Controller
     {
         abort_unless(
             UsuarioRol::esPlantaOperativo(auth()->user())
-                || UsuarioRol::esJefePlanta(auth()->user())
-                || UsuarioRol::esAdminGlobal(auth()->user()),
+                || UsuarioRol::esJefePlanta(auth()->user()),
             403
         );
 
@@ -98,8 +96,7 @@ class SolicitudProduccionPlantaController extends Controller
     {
         abort_unless(
             UsuarioRol::esPlantaOperativo(auth()->user())
-                || UsuarioRol::esJefePlanta(auth()->user())
-                || UsuarioRol::esAdminGlobal(auth()->user()),
+                || UsuarioRol::esJefePlanta(auth()->user()),
             403
         );
 
@@ -116,8 +113,7 @@ class SolicitudProduccionPlantaController extends Controller
     {
         abort_unless(
             UsuarioRol::esPlantaOperativo(auth()->user())
-                || UsuarioRol::esJefePlanta(auth()->user())
-                || UsuarioRol::esAdminGlobal(auth()->user()),
+                || UsuarioRol::esJefePlanta(auth()->user()),
             403
         );
 
@@ -134,8 +130,7 @@ class SolicitudProduccionPlantaController extends Controller
     {
         abort_unless(
             UsuarioRol::esPlantaOperativo(auth()->user())
-                || UsuarioRol::esJefePlanta(auth()->user())
-                || UsuarioRol::esAdminGlobal(auth()->user()),
+                || UsuarioRol::esJefePlanta(auth()->user()),
             403
         );
 

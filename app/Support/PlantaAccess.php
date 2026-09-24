@@ -16,8 +16,8 @@ final class PlantaAccess
             return false;
         }
 
-        if (UsuarioRol::esAdminGlobal($user)) {
-            return true;
+        if (! UsuarioRol::puedeOperar($user)) {
+            return false;
         }
 
         if (! UsuarioRol::esJefePlanta($user)

@@ -24,13 +24,13 @@ class SimulacionRutaService
     public function __construct(
         private readonly RutaPorCallesService $rutasCalles,
         private readonly DistribucionRutaService $distribucion,
-        private readonly RecepcionPuntoVentaService $recepcionPdv,
         private readonly NotificacionUsuarioService $notificaciones,
     ) {}
 
     public function empezarAgricola(EnvioAsignacionMultiple $envio): void
     {
         $envio->loadMissing(['pedido', 'ruta.paradas']);
+        $this->asegurarSinOtroViajeEnCurso((int) $envio->transportista_usuarioid, $envio, null);
 
         if (! SimulacionRutaCatalogo::puedeEmpezarAgricola($envio)) {
             throw new InvalidArgumentException('Este envío no está listo para iniciar la ruta.');
@@ -48,13 +48,39 @@ class SimulacionRutaService
         $geo = $this->construirGeoJson($paradas);
         $duracion = $this->calcularDuracionSegundos($geo, $paradas);
 
-        $envio->update([
-            'estado' => 'en_transporte_planta',
-            'fecha_asignacion' => $envio->fecha_asignacion ?? now(),
-            'simulacion_inicio_at' => now(),
-            'simulacion_duracion_seg' => $duracion,
-            'simulacion_geojson' => $geo,
-        ]);
+        DB::transaction(function () use ($envio, $geo, $duracion) {
+            // Lock del conductor y del envío + revalidación (TRA-06, TRA-15): dos «Empezar ruta»
+            // simultáneos no inician dos veces ni dejan al conductor con dos viajes en curso.
+            $this->bloquearConductor((int) $envio->transportista_usuarioid);
+            $bloqueado = EnvioAsignacionMultiple::query()->whereKey($envio->envioasignacionmultipleid)->lockForUpdate()->firstOrFail();
+            if ($bloqueado->simulacion_inicio_at !== null) {
+                throw new InvalidArgumentException('Este envío ya está en ruta.');
+            }
+            $this->asegurarSinOtroViajeEnCurso((int) $envio->transportista_usuarioid, $envio, null);
+
+            $envio->update([
+                'estado' => 'en_transporte_planta',
+                'fecha_asignacion' => $envio->fecha_asignacion ?? now(),
+                'simulacion_inicio_at' => now(),
+                'simulacion_duracion_seg' => $duracion,
+                'simulacion_geojson' => $geo,
+            ]);
+        });
+    }
+
+    private function bloquearConductor(int $conductorId): void
+    {
+        if ($conductorId > 0) {
+            Usuario::query()->whereKey($conductorId)->lockForUpdate()->first();
+        }
+    }
+
+    private function asegurarSinOtroViajeEnCurso(int $conductorId, ?EnvioAsignacionMultiple $envio, ?RutaDistribucion $ruta): void
+    {
+        $enCurso = \App\Support\ViajeAcceso::viajeEnCursoDelConductor($conductorId, $envio, $ruta);
+        if ($enCurso !== null) {
+            throw new InvalidArgumentException("El transportista ya tiene un viaje en curso ({$enCurso}). Debe completarlo antes de iniciar otro.");
+        }
     }
 
     public function empezarDistribucion(RutaDistribucion $ruta): void
@@ -64,6 +90,8 @@ class SimulacionRutaService
         if (! SimulacionRutaCatalogo::puedeEmpezarDistribucion($ruta)) {
             throw new InvalidArgumentException('Esta ruta no está lista para iniciar.');
         }
+
+        $this->asegurarSinOtroViajeEnCurso((int) $ruta->transportista_usuarioid, null, $ruta);
 
         if (RutaDistribucionCatalogo::esTrasladoPlantaMayorista($ruta)
             && ! app(CierreEnvioPlantaMayoristaService::class)->tieneCondicionesVehiculo($ruta)) {
@@ -84,6 +112,13 @@ class SimulacionRutaService
         $duracion = $this->calcularDuracionSegundos($geo, $paradas);
 
         DB::transaction(function () use ($ruta, $geo, $duracion) {
+            $this->bloquearConductor((int) $ruta->transportista_usuarioid);
+            $bloqueada = RutaDistribucion::query()->whereKey($ruta->rutadistribucionid)->lockForUpdate()->firstOrFail();
+            if (! SimulacionRutaCatalogo::puedeEmpezarDistribucion($bloqueada)) {
+                throw new InvalidArgumentException('Esta ruta ya fue iniciada o no está lista para iniciar.');
+            }
+            $this->asegurarSinOtroViajeEnCurso((int) $ruta->transportista_usuarioid, null, $ruta);
+
             $ruta->update([
                 'estado' => RutaDistribucionCatalogo::ESTADO_EN_RUTA,
                 'fecha_salida' => now(),
@@ -112,18 +147,8 @@ class SimulacionRutaService
     /**
      * @return array<string, mixed>
      */
-    public function estadoAgricola(EnvioAsignacionMultiple $envio, bool $intentarCompletar = false): array
+    public function estadoAgricola(EnvioAsignacionMultiple $envio): array
     {
-        if ($intentarCompletar && $this->debeCompletarAgricola($envio)) {
-            try {
-                $this->completarAgricola($envio);
-            } catch (\Throwable $e) {
-                report($e);
-                $this->marcarRecepcionMinimaAgricola($envio);
-            }
-            $envio->refresh();
-        }
-
         $estado = $this->armarEstado(
             SimulacionRutaCatalogo::TIPO_AGRICOLA,
             $envio->externo_envio_id ?? ('#'.$envio->envioasignacionmultipleid),
@@ -144,18 +169,8 @@ class SimulacionRutaService
     /**
      * @return array<string, mixed>
      */
-    public function estadoDistribucion(RutaDistribucion $ruta, bool $intentarCompletar = false): array
+    public function estadoDistribucion(RutaDistribucion $ruta): array
     {
-        if ($intentarCompletar && $this->debeCompletarDistribucion($ruta)) {
-            try {
-                $this->completarDistribucion($ruta);
-            } catch (\Throwable $e) {
-                report($e);
-                $this->marcarCompletadaMinimaDistribucion($ruta);
-            }
-            $ruta->refresh();
-        }
-
         $estado = $this->armarEstado(
             RutaDistribucionCatalogo::esTrasladoPlantaMayorista($ruta)
                 ? SimulacionRutaCatalogo::TIPO_PLANTA_MAYORISTA
@@ -175,18 +190,18 @@ class SimulacionRutaService
         return $estado;
     }
 
+    /**
+     * Cierre manual del seguimiento GPS: da el recorrido por llegado (100 %) para que el transportista
+     * confirme la llegada y siga el cierre. NO recibe, NO firma y NO mueve inventario (MAY-08, MIN-10):
+     * antes completaba la ruta y, si la transferencia fallaba, igual la marcaba completada (MAY-09).
+     */
     public function completarManualAgricola(EnvioAsignacionMultiple $envio): void
     {
         if (! SimulacionRutaCatalogo::simulacionActivaAgricola($envio)) {
             throw new InvalidArgumentException('Este envío no tiene un recorrido activo para cerrar.');
         }
 
-        try {
-            $this->completarAgricola($envio);
-        } catch (\Throwable $e) {
-            report($e);
-            $this->marcarRecepcionMinimaAgricola($envio);
-        }
+        $envio->update(['simulacion_inicio_at' => $this->inicioRecorridoTerminado((int) ($envio->simulacion_duracion_seg ?? 0))]);
     }
 
     public function completarManualDistribucion(RutaDistribucion $ruta): void
@@ -195,12 +210,12 @@ class SimulacionRutaService
             throw new InvalidArgumentException('Esta ruta no tiene un recorrido activo para cerrar.');
         }
 
-        try {
-            $this->completarDistribucion($ruta);
-        } catch (\Throwable $e) {
-            report($e);
-            $this->marcarCompletadaMinimaDistribucion($ruta);
-        }
+        $ruta->update(['simulacion_inicio_at' => $this->inicioRecorridoTerminado((int) ($ruta->simulacion_duracion_seg ?? 0))]);
+    }
+
+    private function inicioRecorridoTerminado(int $duracionAlmacenada): Carbon
+    {
+        return now()->subSeconds(SimulacionRutaCatalogo::duracionEfectiva($duracionAlmacenada) + 1);
     }
 
     /** @return Collection<int, array<string, mixed>> */
@@ -273,16 +288,13 @@ class SimulacionRutaService
         foreach ($this->listarActivas() as $item) {
             $estado = match ($item['tipo']) {
                 SimulacionRutaCatalogo::TIPO_AGRICOLA => $this->estadoAgricola(
-                    EnvioAsignacionMultiple::query()->findOrFail($item['id']),
-                    false
+                    EnvioAsignacionMultiple::query()->findOrFail($item['id'])
                 ),
                 SimulacionRutaCatalogo::TIPO_DISTRIBUCION => $this->estadoDistribucion(
-                    RutaDistribucion::query()->findOrFail($item['id']),
-                    false
+                    RutaDistribucion::query()->findOrFail($item['id'])
                 ),
                 SimulacionRutaCatalogo::TIPO_PLANTA_MAYORISTA => $this->estadoDistribucion(
-                    RutaDistribucion::query()->findOrFail($item['id']),
-                    false
+                    RutaDistribucion::query()->findOrFail($item['id'])
                 ),
                 default => null,
             };
@@ -312,141 +324,20 @@ class SimulacionRutaService
         return $items;
     }
 
+    /** La simulación agrícola confirma llegada, sin recibir ni acreditar stock en planta. */
     public function completarAgricola(EnvioAsignacionMultiple $envio): void
     {
         if (EnvioAsignacionEstadoCatalogo::llegoADestino($envio)) {
             return;
         }
 
-        // JPL-08: fin de simulación ≠ recepción en planta. Solo confirma llegada;
-        // el stock lo acredita el jefe con pesaje (confirmarDesdePedido + cantidades).
         if ($envio->llegada_confirmada_at === null) {
             $attrs = ['llegada_confirmada_at' => now()];
             if (\Illuminate\Support\Facades\Schema::hasColumn($envio->getTable(), 'llegada_confirmada_usuarioid')) {
                 $attrs['llegada_confirmada_usuarioid'] = $envio->transportista_usuarioid;
             }
             $envio->update($attrs);
-        }
-
-        $this->notificaciones->simulacionCompletadaAgricola($envio->fresh(['pedido', 'transportista']));
-    }
-
-    public function completarDistribucion(RutaDistribucion $ruta): void
-    {
-        if ($ruta->estado === RutaDistribucionCatalogo::ESTADO_COMPLETADA) {
-            return;
-        }
-
-        if (RutaDistribucionCatalogo::esTrasladoPlantaMayorista($ruta)) {
-            $this->completarTrasladoPlantaMayorista($ruta);
-
-            return;
-        }
-
-        $ruta->loadMissing(['pedidos.detalles.insumo.unidadMedida', 'pedidos.puntoVenta', 'transportista']);
-
-        $usuario = $ruta->transportista;
-        if ($usuario === null) {
-            throw new InvalidArgumentException('La ruta no tiene transportista para registrar la recepción en PDV.');
-        }
-
-        foreach ($ruta->pedidos as $pedido) {
-            if (PedidoDistribucionCatalogo::puedeConfirmarRecepcion($pedido)) {
-                $this->recepcionPdv->confirmar($pedido, $usuario);
-            }
-        }
-
-        $ruta->refresh();
-
-        if ($ruta->estado !== RutaDistribucionCatalogo::ESTADO_COMPLETADA) {
-            DB::transaction(function () use ($ruta) {
-                $ruta->update(['estado' => RutaDistribucionCatalogo::ESTADO_COMPLETADA]);
-
-                $ruta->paradas()
-                    ->where('tipo', RutaDistribucionCatalogo::PARADA_ENTREGA_PDV)
-                    ->update(['estado' => 'completada']);
-            });
-        }
-
-        $this->notificaciones->simulacionCompletadaDistribucion($ruta->fresh(['transportista', 'almacenOrigen']));
-    }
-
-    private function completarTrasladoPlantaMayorista(RutaDistribucion $ruta): void
-    {
-        $ruta->loadMissing(['transportista', 'detallesTraslado']);
-
-        $usuario = $ruta->transportista;
-        if ($usuario === null) {
-            throw new InvalidArgumentException('El traslado no tiene transportista para registrar la entrega.');
-        }
-
-        app(TrasladoPlantaMayoristaService::class)->transferirInventarioAlCompletar($ruta, $usuario);
-
-        DB::transaction(function () use ($ruta) {
-            $ruta->update(['estado' => RutaDistribucionCatalogo::ESTADO_COMPLETADA]);
-
-            $ruta->paradas()
-                ->where('tipo', RutaDistribucionCatalogo::PARADA_ENTREGA_MAYORISTA)
-                ->update(['estado' => 'completada']);
-        });
-
-        $this->notificaciones->trasladoPlantaCompletado(
-            $ruta->fresh(['transportista', 'almacenPlantaOrigen', 'almacenMayoristaDestino', 'detallesTraslado.insumo'])
-        );
-    }
-
-    public function debeCompletarAgricola(EnvioAsignacionMultiple $envio): bool
-    {
-        $duracion = SimulacionRutaCatalogo::duracionEfectiva((int) ($envio->simulacion_duracion_seg ?? 0));
-
-        return $envio->simulacion_inicio_at !== null
-            && ! EnvioAsignacionEstadoCatalogo::llegoADestino($envio)
-            && $duracion > 0
-            && $this->segundosTranscurridos($envio->simulacion_inicio_at) >= $duracion;
-    }
-
-    public function debeCompletarDistribucion(RutaDistribucion $ruta): bool
-    {
-        $duracion = SimulacionRutaCatalogo::duracionEfectiva((int) ($ruta->simulacion_duracion_seg ?? 0));
-
-        return $ruta->simulacion_inicio_at !== null
-            && $ruta->estado === RutaDistribucionCatalogo::ESTADO_EN_RUTA
-            && $duracion > 0
-            && $this->segundosTranscurridos($ruta->simulacion_inicio_at) >= $duracion;
-    }
-
-    /**
-     * Fallback de simulación: nunca marca recibido_planta ni acredita stock (JPL-08).
-     */
-    private function marcarRecepcionMinimaAgricola(EnvioAsignacionMultiple $envio): void
-    {
-        if (EnvioAsignacionEstadoCatalogo::llegoADestino($envio)) {
-            return;
-        }
-
-        if ($envio->llegada_confirmada_at === null) {
-            $attrs = ['llegada_confirmada_at' => now()];
-            if (\Illuminate\Support\Facades\Schema::hasColumn($envio->getTable(), 'llegada_confirmada_usuarioid')) {
-                $attrs['llegada_confirmada_usuarioid'] = $envio->transportista_usuarioid;
-            }
-            $envio->update($attrs);
-        }
-
-        $this->notificaciones->simulacionCompletadaAgricola($envio->fresh(['pedido', 'transportista']));
-    }
-
-    private function marcarCompletadaMinimaDistribucion(RutaDistribucion $ruta): void
-    {
-        if ($ruta->estado === RutaDistribucionCatalogo::ESTADO_COMPLETADA) {
-            return;
-        }
-
-        try {
-            $this->completarDistribucion($ruta);
-        } catch (\Throwable $e) {
-            report($e);
-            $ruta->update(['estado' => RutaDistribucionCatalogo::ESTADO_COMPLETADA]);
-            $this->notificaciones->simulacionCompletadaDistribucion($ruta->fresh(['transportista', 'almacenOrigen']));
+            $this->notificaciones->simulacionCompletadaAgricola($envio->fresh(['pedido', 'transportista']));
         }
     }
 
@@ -667,7 +558,7 @@ class SimulacionRutaService
     private function mapearItemLista(EnvioAsignacionMultiple|RutaDistribucion $item): ?array
     {
         if ($item instanceof EnvioAsignacionMultiple) {
-            $estado = $this->estadoAgricola($item, false);
+            $estado = $this->estadoAgricola($item);
             $item->refresh();
             if ($estado['completada'] || ! SimulacionRutaCatalogo::simulacionActivaAgricola($item)) {
                 return null;
@@ -704,7 +595,7 @@ class SimulacionRutaService
             ];
         }
 
-        $estado = $this->estadoDistribucion($item, false);
+        $estado = $this->estadoDistribucion($item);
         $item->refresh();
         if ($estado['completada'] || ! SimulacionRutaCatalogo::simulacionActivaDistribucion($item)) {
             return null;

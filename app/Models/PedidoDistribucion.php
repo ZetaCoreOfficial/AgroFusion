@@ -38,6 +38,8 @@ class PedidoDistribucion extends Model
         'creado_por_usuarioid',
         'envio_iniciado_mayorista',
         'fecha_confirmacion_minorista',
+        'canal_origen',
+        'registrado_manual_por_usuarioid',
     ];
 
     protected $casts = [
@@ -60,6 +62,7 @@ class PedidoDistribucion extends Model
         'creado_por_usuarioid' => 'integer',
         'envio_iniciado_mayorista' => 'boolean',
         'fecha_confirmacion_minorista' => 'datetime',
+        'registrado_manual_por_usuarioid' => 'integer',
     ];
 
     public function puntoVenta(): BelongsTo
@@ -85,6 +88,11 @@ class PedidoDistribucion extends Model
     public function creadoPor(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'creado_por_usuarioid', 'usuarioid');
+    }
+
+    public function registradoManualPor(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'registrado_manual_por_usuarioid', 'usuarioid');
     }
 
     public function detalles(): HasMany

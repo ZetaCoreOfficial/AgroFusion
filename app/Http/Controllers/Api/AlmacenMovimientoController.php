@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Almacen;
 use App\Models\AlmacenMovimiento;
 use App\Models\Insumo;
 use App\Models\TipoMovimientoAlmacen;
+use App\Support\AlmacenAcceso;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -14,7 +16,7 @@ class AlmacenMovimientoController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $q = AlmacenMovimiento::query()
+        $q = AlmacenAcceso::scopeVisibles(AlmacenMovimiento::query(), $user)
             ->with(['almacen', 'insumo', 'tipo', 'usuario'])
             ->orderByDesc('fecha')
             ->orderByDesc('almacen_movimientoid');
@@ -40,6 +42,9 @@ class AlmacenMovimientoController extends Controller
         ]);
 
         $user = $request->user();
+
+        // Ownership (MAY-03/05): el movimiento solo se registra en un almacén que el usuario opera.
+        AlmacenAcceso::asegurarPuedeGestionar($user, Almacen::query()->findOrFail($data['almacenid']));
 
         $tipo = TipoMovimientoAlmacen::query()
             ->whereKey($data['tipo_movimiento_almacenid'])

@@ -18,6 +18,7 @@ use App\Support\EnvioPedidoService;
 use App\Support\PedidoCatalogo;
 use App\Support\PedidoReservaService;
 use App\Support\UsuarioRol;
+use App\Support\ViajeAcceso;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -35,9 +36,10 @@ class AsignacionMultipleController extends Controller
     {
         $user = auth()->user();
         $esTransportistaAsignado = (int) $asignacion->transportista_usuarioid === (int) $user?->usuarioid;
-        $puedeVer = $user?->can('asignaciones.create')
-            || $user?->can('asignaciones.view')
-            || ($esTransportistaAsignado && PedidoCatalogo::envioOperativoParaTransportista($asignacion));
+        // El conductor solo abre SUS envíos (TRA-02): `asignaciones.view` no basta para ver los ajenos.
+        $puedeVer = ViajeAcceso::esConductor($user)
+            ? $esTransportistaAsignado && PedidoCatalogo::envioOperativoParaTransportista($asignacion)
+            : ViajeAcceso::puedeVerEnvioAgricola($user, $asignacion);
         if (! $puedeVer) {
             abort(403, $esTransportistaAsignado
                 ? 'Este envío estará disponible cuando producción agrícola confirme el pedido.'
@@ -420,14 +422,10 @@ class AsignacionMultipleController extends Controller
     public function empezarRuta(EnvioAsignacionMultiple $asignacion, SimulacionRutaService $simulacion): RedirectResponse
     {
         $user = auth()->user();
-        if (! $user?->can('asignaciones.update') && (int) $asignacion->transportista_usuarioid !== (int) $user?->usuarioid) {
-            abort(403);
-        }
+        // Solo el conductor asignado inicia SU ruta (TRA-08); ningún otro permiso lo sustituye.
+        abort_unless(ViajeAcceso::esConductorAsignado($user, $asignacion->transportista_usuarioid), 403);
 
-        if (
-            ! $user?->can('asignaciones.update')
-            && ! PedidoCatalogo::envioOperativoParaTransportista($asignacion)
-        ) {
+        if (! PedidoCatalogo::envioOperativoParaTransportista($asignacion)) {
             abort(403, 'Este envío estará disponible cuando producción agrícola confirme el pedido.');
         }
 
@@ -447,9 +445,7 @@ class AsignacionMultipleController extends Controller
         CierreEnvioAgricolaService $cierre,
     ): RedirectResponse {
         $user = auth()->user();
-        if (! $user?->can('asignaciones.update') && (int) $asignacion->transportista_usuarioid !== (int) $user?->usuarioid) {
-            abort(403);
-        }
+        abort_unless(ViajeAcceso::esConductorAsignado($user, $asignacion->transportista_usuarioid), 403);
 
         if ($asignacion->fecha_recepcion_planta) {
             return back()->with('error', 'Este envío ya fue recibido en planta.');

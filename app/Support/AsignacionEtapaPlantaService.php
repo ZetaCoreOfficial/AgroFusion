@@ -157,7 +157,7 @@ class AsignacionEtapaPlantaService
      */
     public function cerrarFase(LoteProduccionPedido $lote, array $etapa, Usuario $asignador): void
     {
-        if (! UsuarioRol::gestionaPlanta($asignador) && ! UsuarioRol::esAdminGlobal($asignador)) {
+        if (! UsuarioRol::gestionaPlanta($asignador)) {
             throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede cerrar fases.');
         }
 
@@ -250,7 +250,7 @@ class AsignacionEtapaPlantaService
 
     public function cambiarFase(LoteProduccionPedido $lote, int $loteproduccionrutapasoid, Usuario $usuario): void
     {
-        if (! UsuarioRol::gestionaPlanta($usuario) && ! UsuarioRol::esAdminGlobal($usuario)) {
+        if (! UsuarioRol::gestionaPlanta($usuario)) {
             throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede cambiar una fase.');
         }
 
@@ -360,7 +360,7 @@ class AsignacionEtapaPlantaService
             $esOperador = UsuarioRol::esOperarioPlanta($usuario)
                 && (int) $locked->operador_usuarioid === (int) $usuario->usuarioid;
 
-            if (! $esOperador && ! UsuarioRol::esAdminGlobal($usuario)) {
+            if (! $esOperador) {
                 throw new \InvalidArgumentException('No tiene permiso para completar esta tarea.');
             }
 
@@ -476,24 +476,6 @@ class AsignacionEtapaPlantaService
         $this->notificaciones->etapaPlantaAsignada($siguiente->fresh());
     }
 
-    /**
-     * @param  list<array{variableestandarid: int, valor: float|int|string}>  $parametros
-     */
-    public function completarPorSupervisor(AsignacionEtapaPlanta $asignacion, Usuario $supervisor, array $parametros = []): RegistroProcesoMaquinaPlanta
-    {
-        if (! UsuarioRol::gestionaPlanta($supervisor) && ! UsuarioRol::esAdminGlobal($supervisor)) {
-            throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede completar etapas desde procesamiento.');
-        }
-
-        $inicio = $asignacion->creado_en ?? now();
-
-        return $this->completar($asignacion, [
-            'hora_inicio' => $inicio->toDateTimeString(),
-            'hora_fin' => now()->toDateTimeString(),
-            'parametros' => $parametros,
-        ], $supervisor);
-    }
-
     public function puedeReiniciarTodo(LoteProduccionPedido $lote): bool
     {
         if ($this->trazabilidad->transformacionCompleta($lote)) {
@@ -532,7 +514,7 @@ class AsignacionEtapaPlantaService
 
     public function reiniciarTodo(LoteProduccionPedido $lote, Usuario $usuario): void
     {
-        if (! UsuarioRol::gestionaPlanta($usuario) && ! UsuarioRol::esAdminGlobal($usuario)) {
+        if (! UsuarioRol::gestionaPlanta($usuario)) {
             throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede reiniciar las asignaciones.');
         }
 

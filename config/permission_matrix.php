@@ -322,6 +322,9 @@ return [
 
             'delete' => 'punto_venta.delete',
 
+            // MIN-06: ajuste explícito del stock del PDV (con motivo y movimiento auditado).
+            'ajustar' => 'punto_venta.ajuste_stock',
+
         ],
 
         'pedidos_distribucion' => [
@@ -342,7 +345,110 @@ return [
 
     'role_permissions' => [
 
-        'admin' => ['*'],
+        // Admin = supervisión: consulta todos los módulos y administra usuarios, solicitudes,
+        // catálogos y reportes. No ejecuta flujos de negocio (sin create/update/delete operativos).
+        'admin' => [
+
+            // Administración de la plataforma
+            'usuarios.view',
+
+            'usuarios.create',
+
+            'usuarios.update',
+
+            'usuarios.delete',
+
+            'usuarios.admin',
+
+            'solicitudes.view',
+
+            'solicitudes.approve',
+
+            'catalogos.view',
+
+            'catalogos.create',
+
+            'catalogos.update',
+
+            'catalogos.delete',
+
+            'reportes.view',
+
+            // Datos maestros de flota (no son flujos de negocio; ningún otro rol los administra)
+            'vehiculos.view',
+
+            'vehiculos.create',
+
+            'vehiculos.update',
+
+            'vehiculos.delete',
+
+            'transportistas.view',
+
+            'transportistas.create',
+
+            'transportistas.update',
+
+            'transportistas.delete',
+
+            'direcciones.view',
+
+            'direcciones.create',
+
+            'direcciones.update',
+
+            'direcciones.delete',
+
+            // Consulta global (solo lectura)
+            'envios.view',
+
+            'envios.admin.view',
+
+            'lotes.view',
+
+            'inventario.view',
+
+            'pedidos.view',
+
+            'ventas.view',
+
+            'certificaciones.view',
+
+            'incidentes.view',
+
+            'documentos.view',
+
+            'rutas_multi.view',
+
+            'asignaciones.view',
+
+            'monitoreo.view',
+
+            'panel_planta.view',
+
+            'recepcion_planta.view',
+
+            'lote_produccion.view',
+
+            'panel_transportista.view',
+
+            'almacen.ingresos.view',
+
+            'almacen.salidas.view',
+
+            'almacen.movimientos.view',
+
+            'almacen.reportes.view',
+
+            'panel_agricultor.view',
+
+            'panel_mayorista.view',
+
+            'punto_venta.view',
+
+            'pedidos_distribucion.view',
+
+        ],
 
         'jefe_agricultor' => [
 
@@ -512,8 +618,6 @@ return [
 
             'envios.view',
 
-            'envios.update',
-
             'asignaciones.view',
 
             'rutas_multi.view',
@@ -526,17 +630,13 @@ return [
 
             'incidentes.create',
 
+            // TRA-11: sin envios.update, pedidos_distribucion.update, monitoreo.view ni incidentes.delete;
+            // incidentes.update queda acotado a los incidentes que él reportó (TRA-07).
             'incidentes.update',
-
-            'incidentes.delete',
 
             'pedidos.view',
 
             'pedidos_distribucion.view',
-
-            'pedidos_distribucion.update',
-
-            'monitoreo.view',
 
         ],
 
@@ -549,6 +649,8 @@ return [
             'punto_venta.update',
 
             'punto_venta.delete',
+
+            'punto_venta.ajuste_stock',
 
             'pedidos_distribucion.view',
 
@@ -594,13 +696,7 @@ return [
 
             'pedidos.create',
 
-            'usuarios.view',
-
-            'usuarios.create',
-
-            'usuarios.update',
-
-            'usuarios.delete',
+            // MAY-01: sin usuarios.* — el mayorista (incluido este slug legacy) no administra usuarios.
 
         ],
 

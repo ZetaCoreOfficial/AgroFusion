@@ -132,49 +132,52 @@ class RecepcionQrFirmaService
         throw new InvalidArgumentException('El enlace de recepción no está asociado a un envío.');
     }
 
-    public function guardarFirmaRecepcionPublica(string $token, string $nombreFirmante, string $imagenBase64): FirmaRecepcionEnvio
+    /**
+     * Firma de recepción desde el QR con la cuenta del receptor (CROSS-A).
+     *
+     * Antes cualquiera con el enlace (incluido el propio transportista, que lo ve en su pantalla)
+     * podía firmar sin sesión escribiendo un nombre. Ahora el QR solo abre la pantalla: la firma
+     * pasa por el mismo servicio de cierre que valida que sea el receptor del destino.
+     */
+    /** @param  array<int|string, array{recibido?: mixed, motivo?: string|null}>  $recepcion  Cantidades recibidas (solo planta → mayorista). */
+    public function guardarFirmaRecepcionConCuenta(string $token, Usuario $usuario, string $imagenBase64, array $recepcion = []): FirmaRecepcionEnvio
     {
-        $qr = $this->resolverPorToken($token);
-        $operacion = $this->resolverOperacion($qr);
-        $nombreFirmante = trim($nombreFirmante);
+        $operacion = $this->resolverOperacion($this->resolverPorToken($token));
 
-        if ($nombreFirmante === '') {
-            throw new InvalidArgumentException('Ingrese su nombre completo.');
+        if ($operacion instanceof RutaDistribucion && $operacion->esTrasladoPlantaMayorista()) {
+            return app(CierreEnvioPlantaMayoristaService::class)->guardarFirmaRecepcion($operacion, $usuario, $imagenBase64, $recepcion);
         }
 
-        if ($operacion instanceof RutaDistribucion) {
-            $operacion->loadMissing('firmaTransportista', 'firmaRecepcion');
-            if ($operacion->firmaTransportista === null) {
-                throw new InvalidArgumentException('Aún no registró su firma el transportista.');
-            }
-            if ($operacion->firmaRecepcion !== null) {
-                throw new InvalidArgumentException('La firma de recepción ya fue registrada.');
-            }
+        return $this->servicioCierre($operacion)->guardarFirmaRecepcion($operacion, $usuario, $imagenBase64);
+    }
 
-            $firma = FirmaRecepcionEnvio::create([
-                'rutadistribucionid' => $operacion->rutadistribucionid,
-                'imagenfirma' => $this->normalizarImagenFirma($imagenBase64),
-                'nombrefirmante' => $nombreFirmante,
-                'fechafirma' => now(),
-            ]);
-        } else {
-            $operacion->loadMissing('firmaTransportista', 'firmaRecepcion');
-            if ($operacion->firmaTransportista === null) {
-                throw new InvalidArgumentException('Aún no registró su firma el transportista.');
-            }
-            if ($operacion->firmaRecepcion !== null) {
-                throw new InvalidArgumentException('La firma de recepción ya fue registrada.');
-            }
-
-            $firma = FirmaRecepcionEnvio::create([
-                'envioasignacionmultipleid' => $operacion->envioasignacionmultipleid,
-                'imagenfirma' => $this->normalizarImagenFirma($imagenBase64),
-                'nombrefirmante' => $nombreFirmante,
-                'fechafirma' => now(),
-            ]);
+    public function esReceptorAutorizado(RutaDistribucion|EnvioAsignacionMultiple $operacion, ?Usuario $usuario): bool
+    {
+        if ($usuario === null
+            || ! \App\Support\UsuarioRol::puedeOperar($usuario)
+            || (int) $operacion->transportista_usuarioid === (int) $usuario->usuarioid) {
+            return false;
         }
 
-        return $firma;
+        return $this->servicioCierre($operacion)->esReceptor($usuario, $operacion);
+    }
+
+    public function recepcionFirmada(RutaDistribucion|EnvioAsignacionMultiple $operacion): bool
+    {
+        $operacion->loadMissing('firmaRecepcion');
+
+        return \App\Support\FirmaCierreReglas::recepcionValida($operacion->firmaRecepcion, $operacion->transportista_usuarioid);
+    }
+
+    private function servicioCierre(RutaDistribucion|EnvioAsignacionMultiple $operacion): CierreEnvioAgricolaService|CierreEnvioPlantaMayoristaService|CierreEnvioDistribucionPdvService
+    {
+        if ($operacion instanceof EnvioAsignacionMultiple) {
+            return app(CierreEnvioAgricolaService::class);
+        }
+
+        return $operacion->esTrasladoPlantaMayorista()
+            ? app(CierreEnvioPlantaMayoristaService::class)
+            : app(CierreEnvioDistribucionPdvService::class);
     }
 
     public function finalizarSiCompleto(RutaDistribucion|EnvioAsignacionMultiple $operacion): ?DocumentoEntrega

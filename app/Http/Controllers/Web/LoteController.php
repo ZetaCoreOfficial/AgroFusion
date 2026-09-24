@@ -721,8 +721,7 @@ class LoteController extends Controller
 
     private function usuarioEsAdmin(Usuario $usuario): bool
     {
-        return UsuarioRol::esAdminGlobal($usuario)
-            || in_array(strtolower((string) ($usuario->role ?? '')), ['admin'], true);
+        return UsuarioRol::esAdminGlobal($usuario);
     }
 
     private function aplicarScopeLotesVisibles($query, ?Usuario $user): void
@@ -749,9 +748,7 @@ class LoteController extends Controller
 
     private function puedeDesignarResponsableLote(?Usuario $user): bool
     {
-        return $user && (
-            UsuarioRol::esAdminGlobal($user) || UsuarioRol::esJefeAgricultor($user)
-        );
+        return UsuarioRol::gestionaCampo($user);
     }
 
     /** @return array<string, mixed> */
@@ -772,8 +769,9 @@ class LoteController extends Controller
             return false;
         }
 
-        if (! $actor || UsuarioRol::esAdminGlobal($actor)) {
-            return true;
+        // El admin supervisa: no crea lotes ni asigna responsables.
+        if (! UsuarioRol::puedeOperar($actor)) {
+            return false;
         }
 
         if (UsuarioRol::esJefeAgricultor($actor)) {

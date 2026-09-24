@@ -95,8 +95,8 @@ Route::match(['get', 'post'], '/logout', [AuthController::class, 'logout'])->nam
 
 Route::get('/trazabilidad/{codigo}', [TrazabilidadPublicaController::class, 'show'])->name('trazabilidad.publica');
 
+// El QR abre la pantalla sin sesión; firmar exige la cuenta del receptor (CROSS-A).
 Route::get('/recepcion/{token}', [RecepcionQrPublicaController::class, 'show'])->name('recepcion.publica');
-Route::post('/recepcion/{token}', [RecepcionQrPublicaController::class, 'firmar'])->name('recepcion.publica.firmar');
 
 
 // RUTAS PROTEGIDAS (REQUIEREN ESTAR LOGUEADO)
@@ -104,6 +104,7 @@ Route::post('/recepcion/{token}', [RecepcionQrPublicaController::class, 'firmar'
 Route::middleware(['auth', 'cuenta.aprobada'])->group(function () {
 
     Route::get('/api/cierre/firmas-estado', [CierreFirmasEstadoController::class, 'show'])->name('cierre.firmas-estado');
+    Route::post('/recepcion/{token}', [RecepcionQrPublicaController::class, 'firmar'])->name('recepcion.publica.firmar');
 
     // Perfil de Usuario
     Route::get('/perfil', [UserProfileController::class, 'show'])->name('profile.show');
@@ -449,6 +450,7 @@ Route::middleware(['auth', 'cuenta.aprobada'])->group(function () {
     Route::post('/certificaciones/masivo', [CertificacionController::class, 'storeBatch'])->name('certificaciones.store-bulk')->middleware('action.permission:certificaciones,create');
     Route::post('/certificaciones', [CertificacionController::class, 'store'])->name('certificaciones.store')->middleware('action.permission:certificaciones,create');
     Route::get('/certificaciones/{certificacion}', [CertificacionController::class, 'show'])->name('certificaciones.show')->middleware('action.permission:certificaciones,read');
+    Route::post('/certificaciones/{certificacion}/blockchain/sincronizar', [CertificacionController::class, 'sincronizarBlockchain'])->name('certificaciones.blockchain.sincronizar')->middleware('action.permission:certificaciones,update');
 
     Route::get('/certificaciones-planta', [CertificacionPlantaController::class, 'index'])->name('certificaciones-planta.index')->middleware('action.permission:lote_produccion,read');
     Route::get('/certificaciones-planta/{evaluacionFinalLoteProduccion}', [CertificacionPlantaController::class, 'show'])->name('certificaciones-planta.show')->middleware('action.permission:lote_produccion,read');

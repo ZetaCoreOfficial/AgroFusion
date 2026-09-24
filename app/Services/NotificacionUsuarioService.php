@@ -144,6 +144,7 @@ class NotificacionUsuarioService
 
     public function llegadaDestinoReportada(EnvioAsignacionMultiple $asignacion, Usuario $transportista): void
     {
+        $asignacion->loadMissing('pedido');
         $codigo = $asignacion->externo_envio_id ?? '#'.$asignacion->envioasignacionmultipleid;
         $nombre = trim(($transportista->nombre ?? '').' '.($transportista->apellido ?? '')) ?: ($transportista->nombreusuario ?? 'Transportista');
         $planta = $asignacion->pedido?->nombre_planta;
@@ -152,19 +153,12 @@ class NotificacionUsuarioService
             ? "{$nombre} reportó la llegada del envío {$codigo} a {$planta}."
             : "{$nombre} reportó la llegada del envío {$codigo} a destino.";
 
-        $admins = Usuario::query()
-            ->where('activo', true)
-            ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'Admin']));
-            })
-            ->get();
-
-        foreach ($admins as $admin) {
+        $responsable = $this->jefePlantaResponsableDesdePedido($asignacion->pedido);
+        if ($responsable !== null) {
             $this->notificar(
-                $admin,
+                $responsable,
                 'envio_llegada_destino',
-                'Envío recibido en planta',
+                'Envío llegó a planta',
                 $mensaje,
                 route('logistica.asignaciones.listado', ['q' => $codigo], false),
                 'envio_asignacion',
@@ -349,28 +343,13 @@ class NotificacionUsuarioService
             : 'planta';
         $mensaje = "El envío {$codigo} llegó a {$planta} (simulación completada). Chofer: {$chofer}.";
 
-        // JPL-09: planta solo al jefe responsable del almacén destino; no broadcast ni fallback a admin.
-        $destinatarios = collect();
-
+        // JPL-09: solo al jefe responsable del almacén destino, sin difusión general.
         $jefePlantaDestino = $this->jefePlantaResponsableDesdePedido($asignacion->pedido);
-        if ($jefePlantaDestino) {
-            $destinatarios->push($jefePlantaDestino);
-        }
-
-        $jefesAgricolas = Usuario::query()
-            ->where('activo', true)
-            ->where(function ($q) {
-                $q->whereIn('role', ['jefe_agricultor'])
-                    ->orWhereHas('roles', fn ($r) => $r->where('name', 'jefe_agricultor'));
-            })
-            ->get();
-        $destinatarios = $destinatarios->merge($jefesAgricolas)->unique('usuarioid')->values();
-
-        foreach ($destinatarios as $usuario) {
+        if ($jefePlantaDestino !== null) {
             $this->notificar(
-                $usuario,
+                $jefePlantaDestino,
                 'simulacion_envio_completada',
-                'Envío recibido en planta',
+                'Envío llegó a planta',
                 $mensaje,
                 route('logistica.asignaciones.show', $asignacion, false),
                 'envio_asignacion',
@@ -394,8 +373,8 @@ class NotificacionUsuarioService
         $destinatarios = Usuario::query()
             ->where('activo', true)
             ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'jefe_planta']));
+                $q->whereIn('role', UsuarioRol::nombresRolAdmin())
+                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', [...UsuarioRol::nombresRolAdmin(), 'jefe_planta']));
             })
             ->get();
 
@@ -728,7 +707,9 @@ class NotificacionUsuarioService
             ->where('activo', true)
             ->find((int) $almacen->responsable_usuarioid);
 
-        return $responsable ? collect([$responsable]) : collect();
+        return $responsable && UsuarioRol::puedeOperar($responsable) && UsuarioRol::esJefePlanta($responsable)
+            ? collect([$responsable])
+            : collect();
     }
 
     /**
@@ -763,7 +744,11 @@ class NotificacionUsuarioService
             return null;
         }
 
-        return Usuario::query()->where('activo', true)->find($responsableId);
+        $responsable = Usuario::query()->where('activo', true)->find($responsableId);
+
+        return $responsable && UsuarioRol::puedeOperar($responsable) && UsuarioRol::esJefePlanta($responsable)
+            ? $responsable
+            : null;
     }
 
     /** @return \Illuminate\Database\Eloquent\Collection<int, UsuarioNotificacion> */
