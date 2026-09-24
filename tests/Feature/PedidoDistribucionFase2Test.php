@@ -469,7 +469,7 @@ class PedidoDistribucionFase2Test extends TestCase
 
     {
 
-        [$mayorista, $chofer, $vehiculo, , , $insumo, $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , $pdv, $insumo, $pedido] = $this->escenarioPedidoConfirmado();
 
         $this->actingAs($mayorista);
 
@@ -531,6 +531,21 @@ class PedidoDistribucionFase2Test extends TestCase
 
             AlmacenMovimiento::query()->where('referencia', $pedido->numero_solicitud)->exists()
 
+        );
+
+        $pdv->refresh();
+        $this->assertNotNull($pdv->almacenid);
+        $stockPdv = (float) Insumo::query()
+            ->where('almacenid', $pdv->almacenid)
+            ->where('stock', '>', 0)
+            ->sum('stock');
+        $this->assertGreaterThan(0.0, $stockPdv);
+        $this->assertTrue(
+            AlmacenMovimiento::query()
+                ->where('almacenid', $pdv->almacenid)
+                ->where('referencia', $pedido->numero_solicitud)
+                ->where('observaciones', 'like', '[Recepción PDV]%')
+                ->exists()
         );
 
     }
