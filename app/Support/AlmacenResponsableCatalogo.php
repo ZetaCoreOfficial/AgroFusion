@@ -13,7 +13,8 @@ final class AlmacenResponsableCatalogo
     {
         return match ($ambito) {
             AlmacenAmbito::AGRICOLA => ['jefe_agricultor', 'agricultor'],
-            AlmacenAmbito::PLANTA => ['jefe_planta', 'planta'],
+            // JPL-10: responsable general del almacén de planta = solo jefe_planta
+            AlmacenAmbito::PLANTA => ['jefe_planta'],
             AlmacenAmbito::MAYORISTA => ['jefe_mayorista', 'mayorista'],
             AlmacenAmbito::PUNTO_VENTA => ['minorista'],
             default => [],
@@ -24,7 +25,7 @@ final class AlmacenResponsableCatalogo
     {
         return match ($ambito) {
             AlmacenAmbito::AGRICOLA => 'Jefe agrícola / responsable',
-            AlmacenAmbito::PLANTA => 'Jefe de planta / responsable',
+            AlmacenAmbito::PLANTA => 'Jefe de planta',
             AlmacenAmbito::MAYORISTA => 'Mayorista responsable',
             AlmacenAmbito::PUNTO_VENTA => 'Minorista responsable',
             default => 'Responsable del almacén',
@@ -40,7 +41,7 @@ final class AlmacenResponsableCatalogo
         $legacy = (string) ($user->role ?? '');
         $legacyValido = match ($ambito) {
             AlmacenAmbito::AGRICOLA => in_array($legacy, ['jefe_agricultor', 'agricultor'], true),
-            AlmacenAmbito::PLANTA => in_array($legacy, ['jefe_planta', 'planta'], true),
+            AlmacenAmbito::PLANTA => $legacy === 'jefe_planta',
             AlmacenAmbito::MAYORISTA => in_array($legacy, ['jefe_mayorista', 'mayorista'], true),
             AlmacenAmbito::PUNTO_VENTA => $legacy === 'minorista',
             default => false,

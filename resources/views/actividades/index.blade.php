@@ -260,7 +260,16 @@
                                 @endif
                             </td>
                             <td class="text-muted">{{ $act->usuario->nombre ?? '—' }}</td>
-                            <td>{{ $act->fechainicio ? \Carbon\Carbon::parse($act->fechainicio)->format('d/m/Y') : '—' }}</td>
+                            <td>
+                                @if($act->fecha_planificada)
+                                    {{ \Carbon\Carbon::parse($act->fecha_planificada)->format('d/m/Y') }}
+                                    <span class="d-block small text-muted">plan</span>
+                                @elseif($act->fechainicio)
+                                    {{ \Carbon\Carbon::parse($act->fechainicio)->format('d/m/Y') }}
+                                @else
+                                    —
+                                @endif
+                            </td>
                             <td>
                                 @if($esCompletada)
                                     {{ \Carbon\Carbon::parse($act->fechafin)->format('d/m/Y') }}
@@ -332,7 +341,12 @@
                             <i class="fas fa-user mr-1"></i>{{ $act->usuario->nombre ?? '—' }}
                             <span class="mx-1">·</span>
                             <i class="far fa-calendar mr-1"></i>
-                            {{ $act->fechainicio ? \Carbon\Carbon::parse($act->fechainicio)->format('d/m/Y') : '—' }}
+                            @if($act->fecha_planificada)
+                                {{ \Carbon\Carbon::parse($act->fecha_planificada)->format('d/m/Y') }}
+                                <span class="text-muted">(plan)</span>
+                            @else
+                                {{ $act->fechainicio ? \Carbon\Carbon::parse($act->fechainicio)->format('d/m/Y') : '—' }}
+                            @endif
                             @if($esCompletada)
                             <span class="mx-1">→</span>
                             {{ \Carbon\Carbon::parse($act->fechafin)->format('d/m/Y') }}

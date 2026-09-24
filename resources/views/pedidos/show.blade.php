@@ -125,6 +125,64 @@
                     </div>
                 </div>
 
+                @php
+                    $envioAsig = $pedido->envioAsignacion ?? null;
+                    $puedePesaje = \App\Support\UsuarioRol::puedeConfirmarRecepcionPlanta(auth()->user())
+                        && $envioAsig
+                        && empty($envioAsig->fecha_recepcion_planta)
+                        && in_array($envioAsig->estado, ['en_transporte_planta', 'en_ruta', 'en_transito'], true);
+                @endphp
+                @if($puedePesaje)
+                <div class="card ped-show-card" id="pesaje-recepcion">
+                    <div class="card-header">
+                        <h3 class="card-title font-weight-bold mb-0">
+                            <i class="fas fa-weight text-success mr-2"></i>Pesaje / confirmación de recepción
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-3">
+                            Indique la cantidad realmente recibida (kg). Si difiere de lo enviado, se registrará la discrepancia en el movimiento de almacén.
+                        </p>
+                        <form method="POST" action="{{ route('pedidos.confirmar-llegada-planta', $pedido) }}">
+                            @csrf
+                            <div class="table-responsive mb-3">
+                                <table class="table table-sm mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Producto</th>
+                                            <th>Enviado (kg)</th>
+                                            <th>Recibido (kg)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach($pedido->detalles as $det)
+                                        <tr>
+                                            <td>{{ $det->cultivo_personalizado ?? $det->insumo?->nombre ?? '—' }}</td>
+                                            <td>{{ number_format((float) $det->cantidad, 2) }}</td>
+                                            <td style="max-width:9rem">
+                                                <input type="number" step="0.01" min="0.01" required
+                                                       class="form-control form-control-sm"
+                                                       name="cantidades[{{ $det->detallepedidoid }}]"
+                                                       value="{{ old('cantidades.'.$det->detallepedidoid, $det->cantidad) }}">
+                                            </td>
+                                        </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                            <button type="submit" class="btn btn-success font-weight-bold"
+                                    data-confirm-modal
+                                    data-confirm-tone="success"
+                                    data-confirm-title="Confirmar pesaje"
+                                    data-confirm-message="¿Registrar la recepción con las cantidades indicadas?"
+                                    data-confirm-btn="Confirmar">
+                                <i class="fas fa-check mr-1"></i> Confirmar recepción
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                @endif
+
                 @if($trayectoPartes ?? null)
                 <div class="card ped-show-card">
                     <div class="card-header d-flex justify-content-between align-items-center flex-wrap">

@@ -95,6 +95,30 @@ final class ActividadSecuenciaService
         return "Debe completar primero: «{$titulo}» (asignada en orden anterior).";
     }
 
+    /**
+     * Única puerta de secuencia para completar (marcar-realizada, store+completar, API, siembra).
+     *
+     * @throws \Illuminate\Validation\ValidationException
+     */
+    public function asegurarEnTurnoParaCompletar(Actividad $actividad): void
+    {
+        $bloqueo = $this->mensajeBloqueoOrden($actividad);
+        if ($bloqueo !== null) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'actividad' => $bloqueo,
+            ]);
+        }
+    }
+
+    /**
+     * ¿Se puede crear una actividad ya marcada como completada en este lote?
+     * Solo si no hay otras pendientes delante en la cola.
+     */
+    public function puedeCompletarAlCrear(Lote $lote): bool
+    {
+        return $this->siguientePendiente($lote, false) === null;
+    }
+
     public function nombreEjecutor(Actividad $actividad): ?string
     {
         $actividad->loadMissing(['usuario', 'ejecutor']);

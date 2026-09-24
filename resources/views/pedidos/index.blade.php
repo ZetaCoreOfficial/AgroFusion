@@ -286,18 +286,11 @@
                             <td class="text-center pedidos-actions td-acciones text-nowrap">
                                 @if($faseLogistica === 'en_camino_planta')
                                     @can('recepcion_planta.confirm')
-                                    <form method="POST" action="{{ route('pedidos.confirmar-llegada-planta', $pedido) }}" class="d-inline m-0">
-                                        @csrf
-                                        <button type="button"
-                                                class="btn btn-sm btn-outline-success"
-                                                title="Confirmar llegada a planta"
-                                                data-confirm-modal
-                                                data-confirm-tone="success"
-                                                data-confirm-title="Confirmar llegada a planta"
-                                                data-confirm-message="¿Confirma que el pedido {{ $pedido->numero_solicitud }} llegó a planta? Al aceptar, se registrará la carga en el almacén de destino.">
-                                            <i class="fas fa-check"></i>
-                                        </button>
-                                    </form>
+                                    <a href="{{ route('pedidos.show', $pedido) }}#pesaje-recepcion"
+                                       class="btn btn-sm btn-outline-success"
+                                       title="Confirmar llegada con pesaje">
+                                        <i class="fas fa-weight"></i>
+                                    </a>
                                     @endcan
                                 @endif
                                 <a href="{{ route('pedidos.show', $pedido) }}" class="btn btn-sm btn-outline-info" title="Ver">

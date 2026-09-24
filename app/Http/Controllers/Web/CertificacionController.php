@@ -131,6 +131,13 @@ class CertificacionController extends Controller
         }
 
         $lote = Lote::findOrFail($loteid);
+
+        if (! \App\Support\LoteAcceso::puedeGestionar($user, $lote)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'loteid' => 'No puede certificar un lote que no pertenece a su equipo.',
+            ]);
+        }
+
         $trazabilidad = app(\App\Support\LoteTrazabilidadService::class);
 
         if (! $trazabilidad->puedeCertificarCampo($lote, $user)) {

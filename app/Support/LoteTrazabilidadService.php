@@ -278,6 +278,11 @@ class LoteTrazabilidadService
             return false;
         }
 
+        if ($user && UsuarioRol::esJefeAgricultor($user) && ! UsuarioRol::esAdminGlobal($user)
+            && ! LoteAcceso::puedeGestionar($user, $lote)) {
+            return false;
+        }
+
         $lote->loadMissing(['producciones', 'actividades.tipoActividad']);
         $cert = app(CertificacionCampoService::class);
 
@@ -368,15 +373,19 @@ class LoteTrazabilidadService
             return false;
         }
 
-        if (UsuarioRol::gestionaCampo($user)) {
+        if (UsuarioRol::esAdminGlobal($user)) {
             return true;
+        }
+
+        if (UsuarioRol::esJefeAgricultor($user)) {
+            return LoteAcceso::puedeGestionar($user, $lote);
         }
 
         if (UsuarioRol::debeAcotarPorAsignacion($user)) {
             return $this->operarioAsignadoACosecha($lote, $user);
         }
 
-        return true;
+        return false;
     }
 
     public function puedeUsuarioIrACosecha(Lote $lote, ?Usuario $user): bool

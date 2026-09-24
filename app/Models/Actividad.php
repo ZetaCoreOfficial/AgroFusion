@@ -19,6 +19,7 @@ class Actividad extends Model
         'usuarioid_ejecutor',
         'descripcion',
         'fechainicio',
+        'fecha_planificada',
         'fechafin',
         'tipoactividadid',
         'prioridadid',
@@ -37,6 +38,7 @@ class Actividad extends Model
         'prioridadid'     => 'integer',
         'orden_secuencia' => 'integer',
         'fechainicio'     => 'datetime',
+        'fecha_planificada' => 'date',
         'fechafin'        => 'datetime',
     ];
 

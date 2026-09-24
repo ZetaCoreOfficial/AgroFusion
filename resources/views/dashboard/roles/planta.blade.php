@@ -179,7 +179,7 @@
                         </span>
                     </a>
                     @endcan
-                    @if($userPanel && \App\Support\UsuarioRol::esPlantaOperativo($userPanel))
+                    @if($userPanel && \App\Support\UsuarioRol::gestionaPlanta($userPanel))
                     <a href="{{ route('procesos-planta.index') }}" class="role-acc-tile">
                         <span class="role-acc-tile__icon role-acc-tile__icon--prod"><i class="fas fa-cogs"></i></span>
                         <span>
@@ -221,6 +221,7 @@
                 </div>
             </div>
 
+            @if($userRole && \App\Support\UsuarioRol::gestionaPlanta($userRole))
             @can('almacen.movimientos.view')
             <div class="role-acc-grupo">
                 <div class="role-acc-grupo__titulo">Almacén de planta</div>
@@ -251,6 +252,7 @@
                 </div>
             </div>
             @endcan
+            @endif
 
             @canany(['pedidos_distribucion.view', 'pedidos_distribucion.update'])
             <div class="role-acc-grupo">

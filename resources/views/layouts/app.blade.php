@@ -1141,7 +1141,8 @@
                     );
                     $showProdPlantaSection = $isAdmin || $esPlantaOperativo || ($esJefePlantaNav && ! $isAdmin);
                     $puedeProdPlanta = $isAdmin || $esPlantaOperativo || $esJefePlantaNav;
-                    $puedeAlmacenPlanta = $isAdmin || $esPlantaOperativo || $esJefePlantaNav;
+                    // OPP-07: operario no ve administración de almacén / movimientos generales
+                    $puedeAlmacenPlanta = $isAdmin || $esJefePlantaNav;
                 @endphp
 
                 @if($showProdAgricola)
@@ -1322,12 +1323,6 @@
                         <li class="ag-sub-li"><a href="{{ route('maquinas-planta.index') }}" class="ag-sub-a {{ request()->routeIs('maquinas-planta.*') ? 'active' : '' }}">Máquinas de planta</a></li>
                         <li class="ag-sub-li"><a href="{{ route('variables-estandar.index') }}" class="ag-sub-a {{ request()->routeIs('variables-estandar.*') ? 'active' : '' }}">Variables estándar</a></li>
                         <li class="ag-sub-li"><a href="{{ route('produccion-planta.catalogos.index', 'tipos-empaque') }}" class="ag-sub-a {{ request()->routeIs('produccion-planta.catalogos.*') ? 'active' : '' }}">Tipos de empaque</a></li>
-                        @elseif($authUser && \App\Support\UsuarioRol::esOperarioPlanta($authUser))
-                        <li class="ag-sub-li"><a href="{{ route('procesos-planta.index') }}" class="ag-sub-a {{ request()->routeIs('procesos-planta.*') ? 'active' : '' }}">Procesos de planta</a></li>
-                        <li class="ag-sub-li"><a href="{{ route('plantillas-transformacion.index') }}" class="ag-sub-a {{ request()->routeIs('plantillas-transformacion.*') ? 'active' : '' }}">Procesos de transformación</a></li>
-                        <li class="ag-sub-li"><a href="{{ route('maquinas-planta.index') }}" class="ag-sub-a {{ request()->routeIs('maquinas-planta.*') ? 'active' : '' }}">Máquinas de planta</a></li>
-                        <li class="ag-sub-li"><a href="{{ route('variables-estandar.index') }}" class="ag-sub-a {{ request()->routeIs('variables-estandar.*') ? 'active' : '' }}">Variables estándar</a></li>
-                        <li class="ag-sub-li"><a href="{{ route('produccion-planta.catalogos.index', 'tipos-empaque') }}" class="ag-sub-a {{ request()->routeIs('produccion-planta.catalogos.*') ? 'active' : '' }}">Tipos de empaque</a></li>
                         @endif
                     </ul>
                 </li>
@@ -1352,7 +1347,7 @@
                 </li>
                 @endif
 
-                @if(($esJefePlantaNav || $esPlantaOperativo) && ! $isAdmin && ($puedeEnvios || $puedeSubmenuEnviosScoped))
+                @if($esJefePlantaNav && ! $isAdmin && ($puedeEnvios || $puedeSubmenuEnviosScoped))
                 <li class="ag-nav-li">
                     <a href="#" class="ag-nav-a {{ $envPlantaOpen ? 'active group-open' : '' }}" data-toggle-sub="sub-env-planta">
                         <i class="ag-nav-icon fas fa-truck"></i>

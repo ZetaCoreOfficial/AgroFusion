@@ -186,15 +186,23 @@
                 <h5><i class="fas fa-calendar-alt mr-2"></i>Fechas</h5>
                 
                 <div class="row">
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="form-group">
-                            <label class="required-field"><i class="fas fa-calendar mr-1"></i> Fecha Inicio</label>
+                            <label><i class="fas fa-calendar-day mr-1"></i> Fecha planificada</label>
+                            <input type="date" name="fecha_planificada" class="form-control"
+                                   value="{{ old('fecha_planificada', $actividad->fecha_planificada ? \Carbon\Carbon::parse($actividad->fecha_planificada)->format('Y-m-d') : '') }}">
+                            <small class="text-muted">Plan del día; no marca iniciada/completada</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-group">
+                            <label class="required-field"><i class="fas fa-calendar mr-1"></i> Fecha Inicio (real)</label>
                             <input type="datetime-local" name="fechainicio" class="form-control" value="{{ $actividad->fechainicio ? \Carbon\Carbon::parse($actividad->fechainicio)->format('Y-m-d\TH:i') : '' }}" required>
                         </div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="form-group">
-                            <label><i class="fas fa-calendar-check mr-1"></i> Fecha Fin</label>
+                            <label><i class="fas fa-calendar-check mr-1"></i> Fecha Fin (real)</label>
                             <input type="datetime-local" name="fechafin" class="form-control" value="{{ $actividad->fechafin ? \Carbon\Carbon::parse($actividad->fechafin)->format('Y-m-d\TH:i') : '' }}">
                             <small class="text-muted">Dejar vacío si aún no ha finalizado</small>
                         </div>

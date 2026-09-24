@@ -474,6 +474,32 @@
             @if(!empty($timelineVisual))
             <div class="lp-timeline-shell mb-0">
                 @if(!empty($puedeAsignarPlanEtapas))
+                <div class="mb-3 p-3 border rounded bg-light">
+                    <form method="POST" action="{{ route('procesamiento.asignar-todas-pendientes', $lote) }}" class="form-inline flex-wrap" style="gap:.75rem;">
+                        @csrf
+                        <label class="mb-0 font-weight-bold small text-muted mr-1">
+                            <i class="fas fa-users mr-1"></i> Asignar todas las pendientes a
+                        </label>
+                        <select name="operador_usuarioid" class="form-control form-control-sm" required style="min-width:14rem;">
+                            <option value="">— Operario —</option>
+                            @foreach($operadoresPlanta ?? [] as $op)
+                                <option value="{{ $op->usuarioid }}">{{ $op->nombreCompleto() }}</option>
+                            @endforeach
+                        </select>
+                        <button type="submit"
+                                class="btn btn-sm btn-outline-success font-weight-bold"
+                                data-confirm-modal
+                                data-confirm-title="Asignar todas"
+                                data-confirm-message="¿Asignar todas las etapas pendientes a este operario? Se conservará el orden; ninguna se completará."
+                                data-confirm-tone="success"
+                                data-confirm-btn="Asignar todas">
+                            <i class="fas fa-check-double mr-1"></i> Asignar todas
+                        </button>
+                    </form>
+                    <p class="small text-muted mb-0 mt-2">
+                        Un operario para todas las etapas sin asignar. También puede cerrar fase por etapa abajo.
+                    </p>
+                </div>
                 <form method="POST" action="{{ route('procesamiento.asignar-plan-etapas', $lote) }}" id="formAsignarPlanEtapas" class="js-lp-guardar-scroll">
                     @csrf
                 @endif

@@ -71,7 +71,7 @@
                                 <tr>
                                     <td>{{ $act->descripcion }}</td>
                                     <td>{{ $act->lote?->nombre ?? '—' }}</td>
-                                    <td class="text-muted small">{{ $act->fechainicio?->format('d/m/Y') ?? '—' }}</td>
+                                    <td class="text-muted small">{{ $act->fecha_planificada?->format('d/m/Y') ?? $act->fechainicio?->format('d/m/Y') ?? '—' }}</td>
                                     <td class="text-right">
                                         <a href="{{ route('actividades.show', $act) }}" class="btn btn-sm btn-success">Reportar</a>
                                     </td>

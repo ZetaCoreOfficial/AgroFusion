@@ -130,6 +130,12 @@ class ActividadController extends Controller
 
     public function create(Request $request)
     {
+        abort_unless(
+            UsuarioRol::gestionaCampo($request->user()) || $request->user()?->hasRole('admin'),
+            403,
+            'Solo el jefe agrícola puede crear o asignar actividades.'
+        );
+
         if ($request->filled('loteid') && $request->filled('tipo')
             && str_contains(mb_strtolower(trim((string) $request->tipo)), 'siembra')) {
             $params = ['lote' => $request->integer('loteid')];
@@ -463,12 +469,19 @@ class ActividadController extends Controller
 
     public function store(Request $request)
     {
+        abort_unless(
+            UsuarioRol::gestionaCampo($request->user()) || $request->user()?->hasRole('admin'),
+            403,
+            'Solo el jefe agrícola puede crear o asignar actividades.'
+        );
+
         $data = $request->validate([
             'loteid' => 'required|exists:lote,loteid',
             'descripcion' => 'nullable|string|max:200',
             'tipoactividadid' => 'required|exists:tipoactividad,tipoactividadid',
             'prioridadid' => 'nullable|exists:prioridad,prioridadid',
             'fechainicio' => 'nullable|date',
+            'fecha_planificada' => 'nullable|date',
             'fechafin' => 'nullable|date|after_or_equal:fechainicio',
             'observaciones' => 'nullable|string|max:250',
             'detalle_actividad_json' => 'nullable|string',
@@ -487,7 +500,7 @@ class ActividadController extends Controller
         $detalleRaw = $this->actividadInsumos->parseDetalleDesdeRequest($request, $tipo->nombre ?? null);
         $detalle = [];
         if (ActividadDetalleCatalogo::requiereInsumos($tipo->nombre) || ActividadDetalleCatalogo::esRiego($tipo->nombre)) {
-            $detalle = $this->actividadInsumos->validarDetalle($detalleRaw, $tipo->nombre ?? null);
+            $detalle = $this->actividadInsumos->validarDetalle($detalleRaw, $tipo->nombre ?? null, $lote);
         }
 
         $resumenDetalle = ActividadDetalleCatalogo::textoResumenDesdeDetalle($tipo->nombre ?? null, $detalle);
@@ -512,11 +525,22 @@ class ActividadController extends Controller
         $marcandoCompletada = $request->boolean('completar')
             && (int) $usuarioid === (int) ($request->user()?->usuarioid ?? 0);
 
-        $evidenciaPath = $this->guardarEvidenciaSiCompletada($request, $marcandoCompletada);
-
         if ($marcandoCompletada) {
-            $data['fechafin'] = now();
+            $secuencia = app(\App\Support\ActividadSecuenciaService::class);
+            if (! $secuencia->puedeCompletarAlCrear($lote)) {
+                $pendiente = $secuencia->siguientePendiente($lote, false);
+                $titulo = $pendiente
+                    ? ($pendiente->descripcion ?: ($pendiente->tipoActividad->nombre ?? 'otra actividad'))
+                    : 'otra actividad';
+
+                return back()->withInput()->with(
+                    'error',
+                    "No puede completar al crear: debe terminar primero «{$titulo}»."
+                );
+            }
         }
+
+        $evidenciaPath = $this->guardarEvidenciaSiCompletada($request, $marcandoCompletada);
 
         $actividad = Actividad::create([
             'loteid' => $data['loteid'],
@@ -526,7 +550,8 @@ class ActividadController extends Controller
                 : null,
             'descripcion' => $data['descripcion'],
             'fechainicio' => $data['fechainicio'] ?? now(),
-            'fechafin' => $data['fechafin'] ?? null,
+            'fecha_planificada' => $data['fecha_planificada'] ?? null,
+            'fechafin' => null,
             'tipoactividadid' => $data['tipoactividadid'],
             'prioridadid' => $data['prioridadid'],
             'observaciones' => $data['observaciones'] ?? null,
@@ -534,9 +559,23 @@ class ActividadController extends Controller
             'detalle_json' => $detalle !== [] ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : null,
         ]);
 
-        app(\App\Support\ActividadSecuenciaService::class)->asignarOrden($actividad);
+        $secuencia = app(\App\Support\ActividadSecuenciaService::class);
+        $secuencia->asignarOrden($actividad);
 
-        if (! empty($data['fechafin']) && $detalle !== []) {
+        if ($marcandoCompletada) {
+            try {
+                $secuencia->asegurarEnTurnoParaCompletar($actividad->fresh());
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                $actividad->delete();
+                $msg = collect($e->errors())->flatten()->first() ?? 'No puede completar al crear.';
+
+                return back()->withInput()->with('error', $msg);
+            }
+            $actividad->fechafin = now();
+            $actividad->save();
+        }
+
+        if ($marcandoCompletada && $detalle !== []) {
             $this->actividadInsumos->aplicarStockSiCorresponde($actividad, $detalle);
         }
 
@@ -546,7 +585,7 @@ class ActividadController extends Controller
         }
 
         $msgEstado = '';
-        if (! empty($data['fechafin'])) {
+        if ($marcandoCompletada) {
             $estadoAplicado = $this->loteEstadoPorActividad->aplicarDesdeActividad($actividad);
             if ($estadoAplicado) {
                 $msgEstado = " El lote pasó a estado «{$estadoAplicado}».";
@@ -555,7 +594,7 @@ class ActividadController extends Controller
 
         $tipoNombre = mb_strtolower(trim($tipo->nombre ?? ''));
         if (
-            ! empty($data['fechafin'])
+            $marcandoCompletada
             && str_contains($tipoNombre, 'siembra')
             && ! $lote->fechasiembra
         ) {
@@ -650,6 +689,7 @@ class ActividadController extends Controller
             'loteid' => 'required|exists:lote,loteid',
             'descripcion' => 'required|string|max:200',
             'fechainicio' => 'nullable|date',
+            'fecha_planificada' => 'nullable|date',
             'fechafin' => 'nullable|date|after_or_equal:fechainicio',
             'tipoactividadid' => 'required|exists:tipoactividad,tipoactividadid',
             'prioridadid' => 'required|exists:prioridad,prioridadid',
@@ -659,6 +699,11 @@ class ActividadController extends Controller
         $lote = Lote::findOrFail($data['loteid']);
         $responsableAnterior = (int) $actividad->usuarioid;
         $data['usuarioid'] = $this->resolverUsuarioidActividad($request, $lote);
+
+        // OPA-09: editar planificación no debe alterar fechafin real.
+        if (! array_key_exists('fechafin', $data) || $data['fechafin'] === null || $data['fechafin'] === '') {
+            unset($data['fechafin']);
+        }
 
         $actividad->update($data);
         $actividad->refresh();
@@ -732,55 +777,74 @@ class ActividadController extends Controller
                 ->withInput();
         }
 
-        DB::beginTransaction();
-
         try {
-            $actividad->evidencia_foto_path = EvidenciaFoto::guardar(
-                $request->file('evidencia_foto'),
-                'actividades_evidencia'
-            );
-            $actividad->fechafin = now();
-            $completador = $request->user();
-            if ($completador) {
-                $actividad->usuarioid_ejecutor = (int) $completador->usuarioid;
-            }
-            $actividad->save();
+            DB::transaction(function () use ($request, $actividad) {
+                /** @var Actividad $locked */
+                $locked = Actividad::query()
+                    ->whereKey($actividad->actividadid)
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-            if ($actividad->detalle_json) {
-                $detalle = json_decode($actividad->detalle_json, true);
-                if (is_array($detalle)) {
-                    $this->actividadInsumos->aplicarStockSiCorresponde($actividad, $detalle);
+                if ($locked->fechafin !== null) {
+                    throw new \InvalidArgumentException('Esta actividad ya está completada.');
                 }
-            }
 
-            $estadoAplicado = $this->loteEstadoPorActividad->aplicarDesdeActividad($actividad);
+                app(\App\Support\ActividadSecuenciaService::class)->asegurarEnTurnoParaCompletar($locked);
 
-            $actividad->loadMissing(['lote', 'tipoActividad']);
-            $tipoNombre = mb_strtolower(trim($actividad->tipoActividad->nombre ?? ''));
-            if (str_contains($tipoNombre, 'siembra') && $actividad->lote && ! $actividad->lote->fechasiembra) {
-                $actividad->lote->fechasiembra = now()->toDateString();
-                $actividad->lote->fechamodificacion = now();
-                $actividad->lote->save();
-            }
+                $locked->evidencia_foto_path = EvidenciaFoto::guardar(
+                    $request->file('evidencia_foto'),
+                    'actividades_evidencia'
+                );
+                $locked->fechafin = now();
+                $completador = $request->user();
+                if ($completador) {
+                    $locked->usuarioid_ejecutor = (int) $completador->usuarioid;
+                }
+                $locked->save();
 
-            $this->notificaciones->descartarActividadAsignada((int) $actividad->actividadid);
-            $mensajeEstado = $estadoAplicado
-                ? " El lote «{$actividad->lote->nombre}» cambió a «{$estadoAplicado}»."
-                : '';
+                if ($locked->detalle_json) {
+                    $detalle = json_decode($locked->detalle_json, true);
+                    if (is_array($detalle)) {
+                        $this->actividadInsumos->aplicarStockSiCorresponde($locked, $detalle);
+                    }
+                }
 
-            DB::commit();
+                $this->loteEstadoPorActividad->aplicarDesdeActividad($locked);
 
-            return $this->redirectDespuesDeMarcar(
-                $request,
-                $actividad,
-                'success',
-                "Actividad marcada como realizada.{$mensajeEstado}"
-            );
+                $locked->loadMissing(['lote', 'tipoActividad']);
+                $tipoNombre = mb_strtolower(trim($locked->tipoActividad->nombre ?? ''));
+                if (str_contains($tipoNombre, 'siembra') && $locked->lote && ! $locked->lote->fechasiembra) {
+                    $locked->lote->fechasiembra = now()->toDateString();
+                    $locked->lote->fechamodificacion = now();
+                    $locked->lote->save();
+                }
 
+                $this->notificaciones->descartarActividadAsignada((int) $locked->actividadid);
+            });
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $msg = collect($e->errors())->flatten()->first() ?? 'No puede completar esta actividad aún.';
+
+            return $this->redirectDespuesDeMarcar($request, $actividad, 'error', $msg);
+        } catch (\InvalidArgumentException $e) {
+            return $this->redirectDespuesDeMarcar($request, $actividad, 'error', $e->getMessage());
         } catch (\Exception $e) {
-            DB::rollBack();
             return $this->redirectDespuesDeMarcar($request, $actividad, 'error', 'Error: '.$e->getMessage());
         }
+
+        $actividad->refresh();
+        $estadoAplicado = $actividad->lote
+            ? ($actividad->lote->estadoTipo->nombre ?? null)
+            : null;
+        $mensajeEstado = $estadoAplicado
+            ? " El lote «{$actividad->lote->nombre}» cambió a «{$estadoAplicado}»."
+            : '';
+
+        return $this->redirectDespuesDeMarcar(
+            $request,
+            $actividad,
+            'success',
+            "Actividad marcada como realizada.{$mensajeEstado}"
+        );
     }
 
     private function redirectDespuesDeMarcar(Request $request, Actividad $actividad, ?string $flashKey = null, ?string $message = null)
@@ -997,12 +1061,15 @@ class ActividadController extends Controller
         $lote = $act->lote->nombre ?? 'Sin lote';
         $pendiente = $act->fechafin === null;
         $inicio = Carbon::parse($act->fechainicio);
+        $plan = $act->fecha_planificada
+            ? Carbon::parse($act->fecha_planificada)
+            : $inicio;
         $hora = $inicio->format('H:i');
 
         return [
             'id' => (string) $act->actividadid,
             'title' => $tipo.' — '.$lote,
-            'start' => $inicio->format('Y-m-d'),
+            'start' => $plan->format('Y-m-d'),
             'allDay' => true,
             'extendedProps' => [
                 'id' => $act->actividadid,
@@ -1015,6 +1082,9 @@ class ActividadController extends Controller
                 'hora' => $hora,
                 'horaTimestamp' => $inicio->timestamp,
                 'fechainicioFmt' => $inicio->format('d/m/Y H:i'),
+                'fechaPlanificadaFmt' => $act->fecha_planificada
+                    ? Carbon::parse($act->fecha_planificada)->format('d/m/Y')
+                    : null,
                 'fechafin' => $pendiente ? null : Carbon::parse($act->fechafin)->format('d/m/Y H:i'),
                 'pendiente' => $pendiente,
                 'observaciones' => $act->observaciones ?: $act->descripcion,

@@ -22,9 +22,30 @@ class InsumoController extends Controller
         InsumoCatalogo::asegurarInsumosCampo();
 
         $umbral = InsumoCatalogo::UMBRAL_ALERTA_STOCK;
+        $user = auth()->user();
         $q = InsumoCatalogo::aplicarFiltroOperativo(
-            Insumo::with(['tipo', 'unidadMedida'])
+            Insumo::with(['tipo', 'unidadMedida', 'almacen'])
         )->orderBy('insumoid', 'desc');
+
+        // AGR-04: el jefe/operario ve existencias de su(s) almacén(es) agrícola(s), no legacy null.
+        if (
+            $user
+            && ! \App\Support\UsuarioRol::esAdminGlobal($user)
+            && Schema::hasColumn('insumo', 'almacenid')
+        ) {
+            $almacenIds = \App\Support\CampoAccess::scopeAlmacenesAgricolas(
+                \App\Models\Almacen::query()->where('activo', true),
+                $user
+            )->pluck('almacenid')->map(fn ($id) => (int) $id)->all();
+
+            if ($almacenIds === []) {
+                $q->whereRaw('1 = 0');
+            } else {
+                $q->whereIn('almacenid', $almacenIds);
+            }
+        } elseif (Schema::hasColumn('insumo', 'almacenid')) {
+            $q->whereNotNull('almacenid');
+        }
 
         $stats = [
             'total' => (clone $q)->count(),
@@ -60,6 +81,10 @@ class InsumoController extends Controller
 
         $data['stockminimo'] = InsumoCatalogo::UMBRAL_ALERTA_STOCK;
         $data = $this->aplicarImagenInsumo($request, $data);
+
+        if (Schema::hasColumn('insumo', 'almacenid')) {
+            $data['almacenid'] = $this->resolverAlmacenAgricolaParaNuevoInsumo($request);
+        }
 
         $insumo = Insumo::create($data);
         $this->guardarCalibreSiembra($insumo, $calibreData);
@@ -106,6 +131,9 @@ class InsumoController extends Controller
 
         $data['stockminimo'] = InsumoCatalogo::UMBRAL_ALERTA_STOCK;
         $data = $this->aplicarImagenInsumo($request, $data, $insumo);
+
+        // AGR-04: la existencia no puede reasignarse a otro almacén por request manipulado.
+        unset($data['almacenid']);
 
         $insumo->update($data);
         $this->guardarCalibreSiembra($insumo->fresh(), $calibreData);
@@ -289,6 +317,79 @@ class InsumoController extends Controller
 
     private function asegurarInsumoDelAlmacenUsuario(Insumo $insumo): void
     {
-        // Sin restricción por rol almacén: el agricultor gestiona inventario global.
+        $user = auth()->user();
+        if (! $user || \App\Support\UsuarioRol::esAdminGlobal($user)) {
+            return;
+        }
+
+        if (! Schema::hasColumn('insumo', 'almacenid')) {
+            return;
+        }
+
+        // Legacy sin almacén: visible solo lectura admin; resto bloqueado.
+        if ($insumo->almacenid === null) {
+            abort(403, 'Este registro legacy no está ligado a un almacén agrícola operativo.');
+        }
+
+        $almacen = \App\Models\Almacen::query()->find((int) $insumo->almacenid);
+        if (! $almacen || ! \App\Support\CampoAccess::puedeVerAlmacen($user, $almacen)) {
+            abort(403, 'No tiene acceso a este insumo de almacén.');
+        }
+    }
+
+    private function resolverAlmacenAgricolaParaNuevoInsumo(Request $request): int
+    {
+        $user = $request->user();
+        if (! $user) {
+            throw ValidationException::withMessages([
+                'stock' => 'Debe iniciar sesión para registrar existencias agrícolas.',
+            ]);
+        }
+
+        // Admin puede indicar almacén agrícola explícito; jefes/operarios NUNCA
+        // usan un almacenid del request (evita inyectar existencia en almacén ajeno).
+        if (\App\Support\UsuarioRol::esAdminGlobal($user)) {
+            $almacenId = (int) $request->input('almacenid', 0);
+            if ($almacenId > 0) {
+                $alm = \App\Models\Almacen::query()->findOrFail($almacenId);
+                if (($alm->ambito ?? '') !== \App\Support\AlmacenAmbito::AGRICOLA) {
+                    throw ValidationException::withMessages([
+                        'almacenid' => 'Debe indicar un almacén agrícola.',
+                    ]);
+                }
+
+                return (int) $alm->almacenid;
+            }
+        }
+
+        $jefe = \App\Support\UsuarioRol::esJefeAgricultor($user)
+            ? $user
+            : (
+                $user->supervisor_usuarioid
+                    ? \App\Models\Usuario::query()->find((int) $user->supervisor_usuarioid)
+                    : null
+            );
+
+        if (! $jefe || ! \App\Support\UsuarioRol::esJefeAgricultor($jefe)) {
+            throw ValidationException::withMessages([
+                'stock' => 'Solo el jefe agrícola (o su equipo) puede registrar existencias en su almacén.',
+            ]);
+        }
+
+        try {
+            $almacen = \App\Support\CampoAccess::almacenAgricolaOperativoDeJefe($jefe);
+        } catch (\InvalidArgumentException $e) {
+            throw ValidationException::withMessages([
+                'stock' => $e->getMessage(),
+            ]);
+        }
+
+        if ($almacen === null) {
+            throw ValidationException::withMessages([
+                'stock' => 'Cree primero el almacén agrícola operativo del jefe antes de registrar insumos.',
+            ]);
+        }
+
+        return (int) $almacen->almacenid;
     }
 }

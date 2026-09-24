@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Web;
 
 use App\Exceptions\EliminacionBloqueadaException;
 use App\Http\Controllers\Controller;
+use App\Support\CatalogoTecnicoPlantaAcceso;
 use App\Support\EliminacionSegura;
 use App\Support\PlantaCatalogoRegistry;
 use App\Support\TipoEmpaqueAmbito;
+use App\Support\UsuarioRol;
 use Closure;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,10 +21,9 @@ class PlantaCatalogoController extends Controller
 
     public function __construct()
     {
-        $this->middleware(fn (Request $request, Closure $next) => $this->autorizar($request, $next, [
-            'lote_produccion.view',
-            'envios.view',
-        ]))->only(['index']);
+        // Operario planta no administra tipos de empaque (OPP-07); solo jefe/admin/logística.
+        $this->middleware(fn (Request $request, Closure $next) => $this->autorizarIndex($request, $next))
+            ->only(['index']);
 
         $this->middleware(fn (Request $request, Closure $next) => $this->autorizar($request, $next, [
             'lote_produccion.create',
@@ -132,10 +133,23 @@ class PlantaCatalogoController extends Controller
             ->with('success', 'Registro eliminado.');
     }
 
+    private function autorizarIndex(Request $request, Closure $next): Response
+    {
+        $user = $request->user();
+        abort_unless(
+            CatalogoTecnicoPlantaAcceso::puedeAdministrar($user)
+                || ($user && $user->can('envios.view') && ! UsuarioRol::esOperarioPlanta($user)),
+            403
+        );
+
+        return $next($request);
+    }
+
     /** @param  list<string>  $permisos */
     private function autorizar(Request $request, Closure $next, array $permisos): Response
     {
-        abort_unless($request->user()?->canany($permisos), 403);
+        $user = $request->user();
+        abort_unless($user?->canany($permisos) && ! UsuarioRol::esOperarioPlanta($user), 403);
 
         return $next($request);
     }

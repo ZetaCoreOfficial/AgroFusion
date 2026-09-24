@@ -232,9 +232,12 @@ class InsumoCatalogo
             ->all();
 
         return $query->where(function ($q) use ($almacenesAgricolas) {
-            $q->whereNull('almacenid');
+            // Operativo: solo existencias ligadas a almacén agrícola.
+            // Legacy null se conserva en BD pero no se ofrece como inventario agrícola nuevo.
             if ($almacenesAgricolas !== []) {
-                $q->orWhereIn('almacenid', $almacenesAgricolas);
+                $q->whereIn('almacenid', $almacenesAgricolas);
+            } else {
+                $q->whereRaw('1 = 0');
             }
         });
     }
@@ -526,7 +529,8 @@ class InsumoCatalogo
     }
 
     /**
-     * Reasigna insumos con tipos legacy al catálogo oficial y asegura fertilizantes / pesticidas de campo.
+     * Asegura tipos oficiales y plantillas de existencias por almacén agrícola (AGR-04).
+     * Ya no crea una fila global compartida (almacenid null) con stock demo.
      */
     public static function asegurarInsumosCampo(): void
     {
@@ -547,13 +551,27 @@ class InsumoCatalogo
             ?? $kgId;
 
         $catalogo = [
-            ['nombre' => 'Fertilizante NPK 15-15-15', 'slug' => 'fertilizantes', 'um' => $kgId, 'stock' => 280.0],
-            ['nombre' => 'Urea granulada 46%', 'slug' => 'fertilizantes', 'um' => $kgId, 'stock' => 195.0],
-            ['nombre' => 'Abono orgánico compost', 'slug' => 'fertilizantes', 'um' => $kgId, 'stock' => 150.0],
-            ['nombre' => 'Fungicida cobre hidróxido', 'slug' => 'pesticidas', 'um' => $gId, 'stock' => 126.0],
-            ['nombre' => 'Insecticida piretroides', 'slug' => 'pesticidas', 'um' => $lId, 'stock' => 48.0],
-            ['nombre' => 'Herbicida glifosato', 'slug' => 'pesticidas', 'um' => $lId, 'stock' => 72.0],
+            ['nombre' => 'Fertilizante NPK 15-15-15', 'slug' => 'fertilizantes', 'um' => $kgId],
+            ['nombre' => 'Urea granulada 46%', 'slug' => 'fertilizantes', 'um' => $kgId],
+            ['nombre' => 'Abono orgánico compost', 'slug' => 'fertilizantes', 'um' => $kgId],
+            ['nombre' => 'Fungicida cobre hidróxido', 'slug' => 'pesticidas', 'um' => $gId],
+            ['nombre' => 'Insecticida piretroides', 'slug' => 'pesticidas', 'um' => $lId],
+            ['nombre' => 'Herbicida glifosato', 'slug' => 'pesticidas', 'um' => $lId],
         ];
+
+        $almacenes = collect();
+        if (
+            \Illuminate\Support\Facades\Schema::hasTable('almacen')
+            && \Illuminate\Support\Facades\Schema::hasColumn('insumo', 'almacenid')
+        ) {
+            $almacenes = \App\Models\Almacen::query()
+                ->where('activo', true)
+                ->where(function ($q) {
+                    \App\Support\AlmacenAmbito::scope($q, \App\Support\AlmacenAmbito::AGRICOLA);
+                })
+                ->orderBy('almacenid')
+                ->get();
+        }
 
         foreach ($catalogo as $def) {
             $tipoId = $tiposPorSlug->get($def['slug']);
@@ -561,18 +579,23 @@ class InsumoCatalogo
                 continue;
             }
 
-            $insumo = \App\Models\Insumo::query()->firstOrNew(['nombre' => $def['nombre']]);
-            if (! $insumo->exists) {
-                $insumo->stock = $def['stock'];
-                $insumo->stockminimo = self::UMBRAL_ALERTA_STOCK;
+            // Existencia explícita por almacén (stock inicial 0; el jefe registra ingresos).
+            foreach ($almacenes as $almacen) {
+                $insumo = \App\Models\Insumo::query()->firstOrNew([
+                    'nombre' => $def['nombre'],
+                    'almacenid' => (int) $almacen->almacenid,
+                ]);
+                if (! $insumo->exists) {
+                    $insumo->stock = 0;
+                    $insumo->stockminimo = self::UMBRAL_ALERTA_STOCK;
+                }
+                $insumo->tipoinsumoid = $tipoId;
+                $insumo->unidadmedidaid = (int) $def['um'];
+                if (! InsumoImagenCatalogo::esImagenPersonalizada((string) ($insumo->imagenurl ?? ''))) {
+                    $insumo->imagenurl = InsumoImagenCatalogo::urlPorNombreYTipo($def['nombre'], $def['slug']);
+                }
+                $insumo->save();
             }
-
-            $insumo->tipoinsumoid = $tipoId;
-            $insumo->unidadmedidaid = (int) $def['um'];
-            if (! InsumoImagenCatalogo::esImagenPersonalizada((string) ($insumo->imagenurl ?? ''))) {
-                $insumo->imagenurl = InsumoImagenCatalogo::urlPorNombreYTipo($def['nombre'], $def['slug']);
-            }
-            $insumo->save();
         }
 
         self::rellenarImagenesInsumosOperativos();

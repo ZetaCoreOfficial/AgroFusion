@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Actividad;
+use App\Models\Almacen;
 use App\Models\AsignacionEtapaPlanta;
 use App\Models\EnvioAsignacionMultiple;
 use App\Models\Lote;
@@ -11,12 +12,15 @@ use App\Models\PedidoDistribucion;
 use App\Models\Usuario;
 use App\Models\UsuarioNotificacion;
 use App\Models\RutaDistribucion;
+use App\Support\AlmacenAmbito;
 use App\Support\EnvioAsignacionEstadoCatalogo;
 use App\Support\EnvioPedidoService;
 use App\Support\PedidoCatalogo;
 use App\Support\PedidoDistribucionCatalogo;
 use App\Support\RutaDistribucionCatalogo;
 use App\Support\UsuarioRol;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 class NotificacionUsuarioService
 {
@@ -345,13 +349,22 @@ class NotificacionUsuarioService
             : 'planta';
         $mensaje = "El envío {$codigo} llegó a {$planta} (simulación completada). Chofer: {$chofer}.";
 
-        $destinatarios = Usuario::query()
+        // JPL-09: planta solo al jefe responsable del almacén destino; no broadcast ni fallback a admin.
+        $destinatarios = collect();
+
+        $jefePlantaDestino = $this->jefePlantaResponsableDesdePedido($asignacion->pedido);
+        if ($jefePlantaDestino) {
+            $destinatarios->push($jefePlantaDestino);
+        }
+
+        $jefesAgricolas = Usuario::query()
             ->where('activo', true)
             ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'jefe_planta', 'jefe_agricultor']));
+                $q->whereIn('role', ['jefe_agricultor'])
+                    ->orWhereHas('roles', fn ($r) => $r->where('name', 'jefe_agricultor'));
             })
             ->get();
+        $destinatarios = $destinatarios->merge($jefesAgricolas)->unique('usuarioid')->values();
 
         foreach ($destinatarios as $usuario) {
             $this->notificar(
@@ -698,27 +711,59 @@ class NotificacionUsuarioService
             ->get();
     }
 
-    /** @return \Illuminate\Support\Collection<int, Usuario> */
-    private function destinatariosPlantaTraslado(RutaDistribucion $ruta): \Illuminate\Support\Collection
+    /** @return Collection<int, Usuario> */
+    private function destinatariosPlantaTraslado(RutaDistribucion $ruta): Collection
     {
-        $destinatarios = collect();
-
-        if ($ruta->creado_por_usuarioid) {
-            $ruta->loadMissing('creadoPor');
-            if ($ruta->creadoPor?->activo) {
-                $destinatarios->push($ruta->creadoPor);
-            }
+        // JPL-09: solo el responsable inequívoco del almacén de planta origen.
+        // Sin responsable / sin almacén → no inventar destinatarios (tampoco admin).
+        $ruta->loadMissing('almacenPlantaOrigen');
+        $almacen = $ruta->almacenPlantaOrigen;
+        if (! $almacen
+            || ! Schema::hasColumn('almacen', 'responsable_usuarioid')
+            || ! $almacen->responsable_usuarioid) {
+            return collect();
         }
 
-        $supervisores = Usuario::query()
+        $responsable = Usuario::query()
             ->where('activo', true)
-            ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'jefe_planta']));
-            })
-            ->get();
+            ->find((int) $almacen->responsable_usuarioid);
 
-        return $destinatarios->merge($supervisores)->unique('usuarioid')->values();
+        return $responsable ? collect([$responsable]) : collect();
+    }
+
+    /**
+     * Jefe de planta destinatario inequívoco vía responsable_usuarioid del almacén
+     * de planta resuelto desde el destino del pedido (misma lógica de recepción).
+     * Si el destino es ambiguo o sin responsable, retorna null (no fallback a admin).
+     */
+    private function jefePlantaResponsableDesdePedido(?Pedido $pedido): ?Usuario
+    {
+        if ($pedido === null || ! Schema::hasColumn('almacen', 'responsable_usuarioid')) {
+            return null;
+        }
+
+        $texto = (string) ($pedido->direccion_texto ?? '');
+        $nombre = trim(explode('·', $texto)[0]);
+        $nombre = trim(explode('GPS', $nombre)[0]);
+        if ($nombre === '') {
+            return null;
+        }
+
+        $coincidencias = AlmacenAmbito::scope(
+            Almacen::query()->where('activo', true),
+            AlmacenAmbito::PLANTA
+        )->where('nombre', 'like', '%'.$nombre.'%')->get();
+
+        if ($coincidencias->count() !== 1) {
+            return null;
+        }
+
+        $responsableId = (int) ($coincidencias->first()->responsable_usuarioid ?? 0);
+        if ($responsableId <= 0) {
+            return null;
+        }
+
+        return Usuario::query()->where('activo', true)->find($responsableId);
     }
 
     /** @return \Illuminate\Database\Eloquent\Collection<int, UsuarioNotificacion> */
