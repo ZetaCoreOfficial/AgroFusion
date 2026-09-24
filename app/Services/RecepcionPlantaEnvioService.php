@@ -13,6 +13,8 @@ use App\Models\Usuario;
 use App\Support\AlmacenAmbito;
 use App\Support\EnvioAsignacionEstadoCatalogo;
 use App\Support\InsumoCatalogo;
+use App\Support\PlantaAccess;
+use App\Support\UsuarioRol;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -78,9 +80,12 @@ class RecepcionPlantaEnvioService
     }
 
     /**
-     * Confirma recepción en planta usando datos del pedido (listado rápido).
+     * Confirma recepción en planta con pesaje (JPL-08).
+     *
+     * @param  array<int, float>  $cantidadesRecibidas  mapa detallepedidoid => kg recibidos (obligatorio).
+     *        No hay path legacy sin pesaje: transportista/cierre/simulación no pueden acreditar stock.
      */
-    public function confirmarDesdePedido(Pedido $pedido, Usuario $usuario): void
+    public function confirmarDesdePedido(Pedido $pedido, Usuario $usuario, ?array $cantidadesRecibidas = null): void
     {
         $pedido->load(['detalles.insumo', 'envioAsignacion']);
         $asignacion = $pedido->envioAsignacion;
@@ -90,7 +95,7 @@ class RecepcionPlantaEnvioService
         }
 
         if ($asignacion->fecha_recepcion_planta) {
-            return;
+            throw new \InvalidArgumentException('Este envío ya fue confirmado en planta.');
         }
 
         if (! in_array($asignacion->estado, ['en_transporte_planta', 'en_ruta', 'en_transito'], true)) {
@@ -101,22 +106,49 @@ class RecepcionPlantaEnvioService
             throw new \InvalidArgumentException('El pedido no tiene productos.');
         }
 
+        if (! UsuarioRol::puedeConfirmarRecepcionPlanta($usuario)) {
+            throw new \InvalidArgumentException('Solo el jefe de planta puede confirmar la recepción con pesaje.');
+        }
+
+        if ($cantidadesRecibidas === null || $cantidadesRecibidas === []) {
+            throw new \InvalidArgumentException(
+                'Debe indicar la cantidad recibida (pesaje) para cada producto.'
+            );
+        }
+
         $almacen = $this->resolverAlmacenPlantaDesdePedido($pedido);
 
-        if ($almacen === null) {
-            throw new \InvalidArgumentException('No se encontró un almacén de planta destino.');
+        if (! UsuarioRol::esAdminGlobal($usuario)
+            && ! PlantaAccess::puedeGestionarAlmacen($usuario, $almacen)) {
+            throw new \InvalidArgumentException('No puede confirmar recepción en un almacén de otra planta.');
         }
 
         $tipoIngreso = $this->tipoMovimientoIngresoRecepcion();
         $numeroSolicitud = (string) $pedido->numero_solicitud;
 
-        DB::transaction(function () use ($asignacion, $usuario, $almacen, $pedido, $tipoIngreso, $numeroSolicitud) {
+        DB::transaction(function () use (
+            $asignacion,
+            $usuario,
+            $almacen,
+            $pedido,
+            $tipoIngreso,
+            $numeroSolicitud,
+            $cantidadesRecibidas
+        ) {
             $ahora = now();
 
             foreach ($pedido->detalles as $detalle) {
-                $cantidad = (float) $detalle->cantidad;
+                $enviada = (float) $detalle->cantidad;
+                $detalleId = (int) $detalle->detallepedidoid;
+
+                if (! array_key_exists($detalleId, $cantidadesRecibidas)) {
+                    throw new \InvalidArgumentException(
+                        'Debe indicar la cantidad recibida (pesaje) para cada producto.'
+                    );
+                }
+                $cantidad = (float) $cantidadesRecibidas[$detalleId];
                 if ($cantidad <= 0) {
-                    continue;
+                    throw new \InvalidArgumentException('La cantidad recibida debe ser mayor que 0.');
                 }
 
                 $producto = trim((string) ($detalle->cultivo_personalizado ?? $detalle->insumo?->nombre ?? ''));
@@ -137,6 +169,14 @@ class RecepcionPlantaEnvioService
                     $this->aplicarDetalleRecepcionPedido($insumo, $numeroSolicitud);
                 }
 
+                $obs = '[Recepción planta — '.$asignacion->externo_envio_id.'] '
+                    .$producto.' · '.$this->textoRecepcionPedido($numeroSolicitud)
+                    .' · enviado '.$enviada.' kg · recibido '.$cantidad.' kg';
+                if (abs($cantidad - $enviada) > 0.0001) {
+                    $diff = $cantidad - $enviada;
+                    $obs .= ' · discrepancia '.($diff > 0 ? '+' : '').round($diff, 2).' kg';
+                }
+
                 AlmacenMovimiento::create([
                     'almacenid' => $almacen->almacenid,
                     'insumoid' => $insumo->insumoid,
@@ -146,8 +186,7 @@ class RecepcionPlantaEnvioService
                     'cantidad' => $cantidad,
                     'referencia' => $asignacion->externo_envio_id,
                     'destino_motivo' => $almacen->nombre,
-                    'observaciones' => '[Recepción planta — '.$asignacion->externo_envio_id.'] '
-                        .$producto.' · '.$this->textoRecepcionPedido($numeroSolicitud),
+                    'observaciones' => $obs,
                 ]);
 
                 $insumo->incrementarStock($cantidad);
@@ -162,7 +201,22 @@ class RecepcionPlantaEnvioService
         });
     }
 
-    private function resolverAlmacenPlantaDesdePedido(Pedido $pedido): ?Almacen
+    public function puedeRecibirPedido(Pedido $pedido, Usuario $usuario): bool
+    {
+        if (! UsuarioRol::puedeConfirmarRecepcionPlanta($usuario)) {
+            return false;
+        }
+
+        try {
+            $almacen = $this->resolverAlmacenPlantaDesdePedido($pedido);
+        } catch (\InvalidArgumentException) {
+            return false;
+        }
+
+        return PlantaAccess::puedeGestionarAlmacen($usuario, $almacen);
+    }
+
+    private function resolverAlmacenPlantaDesdePedido(Pedido $pedido): Almacen
     {
         $texto = (string) ($pedido->direccion_texto ?? '');
         $nombre = trim(explode('·', $texto)[0]);
@@ -173,14 +227,27 @@ class RecepcionPlantaEnvioService
             AlmacenAmbito::PLANTA
         );
 
-        if ($nombre !== '') {
-            $coincidencia = (clone $query)->where('nombre', 'like', '%'.$nombre.'%')->first();
-            if ($coincidencia !== null) {
-                return $coincidencia;
-            }
+        if ($nombre === '') {
+            throw new \InvalidArgumentException(
+                'No se pudo determinar el almacén de planta destino del pedido. Indique un destino inequívoco.'
+            );
         }
 
-        return $query->orderBy('nombre')->first();
+        $coincidencias = (clone $query)->where('nombre', 'like', '%'.$nombre.'%')->get();
+
+        if ($coincidencias->count() === 1) {
+            return $coincidencias->first();
+        }
+
+        if ($coincidencias->count() > 1) {
+            throw new \InvalidArgumentException(
+                'Hay varios almacenes de planta que coinciden con «'.$nombre.'». Especifique el destino exacto.'
+            );
+        }
+
+        throw new \InvalidArgumentException(
+            'No se encontró un almacén de planta destino para «'.$nombre.'».'
+        );
     }
 
     private function crearInsumoRecepcionEnAlmacen(

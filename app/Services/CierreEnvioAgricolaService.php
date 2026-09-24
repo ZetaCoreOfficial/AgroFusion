@@ -27,8 +27,8 @@ use InvalidArgumentException;
 class CierreEnvioAgricolaService
 {
     public function __construct(
-        private readonly RecepcionPlantaEnvioService $recepcionPlanta,
         private readonly SimulacionRutaService $simulacion,
+        private readonly RecepcionPlantaEnvioService $recepcionPlanta,
     ) {}
 
     public function tieneCondicionesVehiculo(EnvioAsignacionMultiple $envio): bool
@@ -100,7 +100,9 @@ class CierreEnvioAgricolaService
             'puede_firmar_transportista' => $llegadaConfirmada && $tieneIncidentes && ! $recibido && ! $firmaTransportista,
             'puede_firmar_recepcion' => $llegadaConfirmada && $tieneIncidentes && ! $recibido
                 && $firmaTransportista && ! $firmaRecepcion,
-            'puede_finalizar' => $llegadaConfirmada && $tieneIncidentes && $firmaTransportista && $firmaRecepcion && ! $recibido,
+            // JPL-08: el documento se finaliza tras el pesaje del jefe (no acredita stock aquí).
+            'puede_finalizar' => $llegadaConfirmada && $tieneIncidentes && $firmaTransportista && $firmaRecepcion && $recibido,
+            'espera_pesaje_planta' => $llegadaConfirmada && $tieneIncidentes && $firmaTransportista && $firmaRecepcion && ! $recibido,
         ], $envio);
     }
 
@@ -328,10 +330,17 @@ class CierreEnvioAgricolaService
         });
     }
 
-    /** Personal de planta que confirma recepciones (nunca el transportista del envío). */
+    /** Solo el jefe de planta responsable del destino puede firmar la recepción. */
     public function esReceptor(?Usuario $usuario, EnvioAsignacionMultiple $envio): bool
     {
-        return $usuario !== null && $usuario->can('recepcion_planta.confirm');
+        if ($usuario === null) {
+            return false;
+        }
+
+        $envio->loadMissing('pedido');
+
+        return $envio->pedido !== null
+            && $this->recepcionPlanta->puedeRecibirPedido($envio->pedido, $usuario);
     }
 
     public function finalizarEntrega(EnvioAsignacionMultiple $envio, Usuario $usuario): DocumentoEntrega
@@ -348,26 +357,32 @@ class CierreEnvioAgricolaService
             }
         }
 
+        $envio->loadMissing('pedido');
+
+        if ($envio->pedido === null) {
+            throw new InvalidArgumentException('El envío no tiene pedido asociado para registrar la recepción en planta.');
+        }
+
+        // JPL-08: stock/recepción solo vía pesaje del jefe; aquí solo se emite el documento.
+        if ($envio->fecha_recepcion_planta === null) {
+            throw new InvalidArgumentException(
+                'El jefe de planta debe confirmar el pesaje (cantidad recibida) antes de finalizar el documento de entrega.'
+            );
+        }
+
         $resumen = $this->resumenPasos($envio);
 
         if (! ($resumen['puede_finalizar'] ?? false)) {
-            throw new InvalidArgumentException('Complete condiciones, llegada, incidentes y firmas antes de finalizar.');
+            throw new InvalidArgumentException('Complete condiciones, llegada, incidentes, firmas y pesaje en planta antes de finalizar.');
         }
 
-        $envio->loadMissing('pedido');
-
         $documento = DB::transaction(function () use ($envio, $usuario) {
-            EnvioAsignacionMultiple::query()->whereKey($envio->envioasignacionmultipleid)->lockForUpdate()->first();
-            $envio->load(['firmaTransportista', 'firmaRecepcion']);
+            EnvioAsignacionMultiple::query()->whereKey($envio->envioasignacionmultipleid)->lockForUpdate()->firstOrFail();
+            $envio->refresh()->load(['firmaTransportista', 'firmaRecepcion']);
             FirmaCierreReglas::asegurarFirmasParaCierre($envio->firmaTransportista, $envio->firmaRecepcion, $envio->transportista_usuarioid);
-
-            if ($envio->pedido) {
-                $this->recepcionPlanta->confirmarDesdePedido($envio->pedido, $usuario);
-            } else {
-                throw new InvalidArgumentException('El envío no tiene pedido asociado para registrar la recepción en planta.');
+            if ($envio->fecha_recepcion_planta === null) {
+                throw new InvalidArgumentException('El jefe de planta debe confirmar el pesaje antes de finalizar la entrega.');
             }
-
-            $envio->refresh();
 
             return $this->generarDocumentoTransporte($envio, $usuario);
         });

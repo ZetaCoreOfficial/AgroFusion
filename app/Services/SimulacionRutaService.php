@@ -24,6 +24,7 @@ class SimulacionRutaService
     public function __construct(
         private readonly RutaPorCallesService $rutasCalles,
         private readonly DistribucionRutaService $distribucion,
+        private readonly NotificacionUsuarioService $notificaciones,
     ) {}
 
     public function empezarAgricola(EnvioAsignacionMultiple $envio): void
@@ -321,6 +322,23 @@ class SimulacionRutaService
         }
 
         return $items;
+    }
+
+    /** La simulación agrícola confirma llegada, sin recibir ni acreditar stock en planta. */
+    public function completarAgricola(EnvioAsignacionMultiple $envio): void
+    {
+        if (EnvioAsignacionEstadoCatalogo::llegoADestino($envio)) {
+            return;
+        }
+
+        if ($envio->llegada_confirmada_at === null) {
+            $attrs = ['llegada_confirmada_at' => now()];
+            if (\Illuminate\Support\Facades\Schema::hasColumn($envio->getTable(), 'llegada_confirmada_usuarioid')) {
+                $attrs['llegada_confirmada_usuarioid'] = $envio->transportista_usuarioid;
+            }
+            $envio->update($attrs);
+            $this->notificaciones->simulacionCompletadaAgricola($envio->fresh(['pedido', 'transportista']));
+        }
     }
 
     private function segundosTranscurridos(?Carbon $inicio): int

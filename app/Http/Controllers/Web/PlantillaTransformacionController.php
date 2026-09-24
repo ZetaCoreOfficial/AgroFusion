@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PlantillaTransformacion;
 use App\Models\PlantillaTransformacionPasoVariable;
 use App\Models\VariableEstandar;
+use App\Support\CatalogoTecnicoPlantaAcceso;
 use App\Support\ParametroRangoPlanta;
 use App\Support\ProcesoPlantaCatalogo;
 use Illuminate\Http\JsonResponse;
@@ -19,8 +20,15 @@ class PlantillaTransformacionController extends Controller
     public function __construct()
     {
         $this->middleware(function ($request, $next) {
-            if ($request->user()?->hasRole('agricultor') || $request->user()?->hasRole('transportista')) {
-                abort(403);
+            $user = $request->user();
+            $method = $request->route()?->getActionMethod();
+
+            if ($method === 'parametrosJson') {
+                abort_unless(CatalogoTecnicoPlantaAcceso::puedeLeerAuxiliar($user), 403);
+            } elseif (in_array($method, ['store', 'update', 'destroy', 'create', 'edit'], true)) {
+                abort_unless(CatalogoTecnicoPlantaAcceso::puedeGestionar($user), 403);
+            } else {
+                abort_unless(CatalogoTecnicoPlantaAcceso::puedeAdministrar($user), 403);
             }
 
             return $next($request);

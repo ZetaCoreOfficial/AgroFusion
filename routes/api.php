@@ -137,8 +137,17 @@ Route::name('api.')->group(function () use ($recursoProtegido) {
         ->middleware(['auth:sanctum', 'action.permission:inventario,delete']);
     $recursoProtegido('lote-insumos', LoteInsumoController::class, 'lotes');
 
-    // ACTIVIDADES
-    $recursoProtegido('actividades', ActividadController::class, 'lotes');
+    // ACTIVIDADES: lectura y escritura protegidas por acción y ownership del controlador.
+    Route::get('actividades', [ActividadController::class, 'index'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,read']);
+    Route::post('actividades', [ActividadController::class, 'store'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,update']);
+    Route::get('actividades/{actividad}', [ActividadController::class, 'show'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,read']);
+    Route::match(['put', 'patch'], 'actividades/{actividad}', [ActividadController::class, 'update'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,update']);
+    Route::delete('actividades/{actividad}', [ActividadController::class, 'destroy'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,update']);
 
     // CLIMA
     $recursoProtegido('climas', ClimaController::class, 'lotes');

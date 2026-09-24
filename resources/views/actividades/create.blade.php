@@ -124,6 +124,16 @@
                     </div>
 
                     <div class="form-group">
+                        <label><i class="fas fa-calendar-day mr-1"></i> Fecha planificada</label>
+                        <input type="date" name="fecha_planificada" class="form-control"
+                               value="{{ old('fecha_planificada') }}">
+                        <small class="form-text text-muted">
+                            Día previsto para ejecutar la actividad (el operario la verá como límite/plan).
+                            No marca la actividad como iniciada ni completada.
+                        </small>
+                    </div>
+
+                    <div class="form-group">
                         <label><i class="fas fa-comment mr-1"></i> Observaciones</label>
                         <textarea name="observaciones" class="form-control" maxlength="250" rows="2"
                                   placeholder="Opcional...">{{ old('observaciones') }}</textarea>
@@ -147,7 +157,10 @@
                         </div>
                         <div class="card-body">
                             <p class="small text-muted mb-2">
-                                <i class="fas fa-calendar mr-1"></i> <strong>Fecha inicio:</strong> Se registra automaticamente (ahora)
+                                <i class="fas fa-calendar-day mr-1"></i> <strong>Fecha planificada:</strong> cuándo debe hacerse (opcional)
+                            </p>
+                            <p class="small text-muted mb-2">
+                                <i class="fas fa-calendar mr-1"></i> <strong>Fecha inicio real:</strong> se registra al crear / al ejecutar
                             </p>
                             <p class="small text-muted mb-0">
                                 <i class="fas fa-user mr-1"></i> <strong>Responsable:</strong>

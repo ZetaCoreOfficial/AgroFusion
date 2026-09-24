@@ -42,6 +42,8 @@ use App\Support\AlmacenPlantaCosechaCatalogo;
 
 use App\Support\AlmacenResponsableCatalogo;
 
+use App\Support\CampoAccess;
+
 use App\Support\InsumoCatalogo;
 
 use App\Support\MayoristaAccess;
@@ -213,6 +215,15 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
+        $user = $request->user();
+        abort_unless(UsuarioRol::puedeOperar($user), 403);
+        abort_unless(match ($ctx['ambito']) {
+            AlmacenAmbito::AGRICOLA => UsuarioRol::gestionaCampo($user),
+            AlmacenAmbito::PLANTA => UsuarioRol::gestionaPlanta($user),
+            AlmacenAmbito::MAYORISTA => UsuarioRol::puedeGestionarDistribucionMayorista($user),
+            default => false,
+        }, 403);
+
         $data = $this->validarAlmacen($request);
 
         $data['ambito'] = $ctx['ambito'];
@@ -238,7 +249,9 @@ class AlmacenController extends Controller
             $data['responsable_usuarioid'] = $this->resolverResponsableAlmacen($request, $ctx['ambito'], $data);
         }
 
-
+        if ($ctx['ambito'] === AlmacenAmbito::AGRICOLA && Schema::hasColumn('almacen', 'responsable_usuarioid')) {
+            CampoAccess::assertPuedeCrearAlmacenAgricolaPara((int) $data['responsable_usuarioid']);
+        }
 
         Almacen::create($data);
 
@@ -260,7 +273,6 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
         $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: false);
 
         // Un GET de visualización no descuenta stock ni crea movimientos (MAY-07): la salida
@@ -300,7 +312,6 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
         $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
 
@@ -325,7 +336,6 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
         $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
 
@@ -348,7 +358,13 @@ class AlmacenController extends Controller
             $data['responsable_usuarioid'] = $this->resolverResponsableAlmacen($request, $ctx['ambito'], $data);
         }
 
-
+        if (
+            $ctx['ambito'] === AlmacenAmbito::AGRICOLA
+            && Schema::hasColumn('almacen', 'responsable_usuarioid')
+            && (int) $data['responsable_usuarioid'] !== (int) ($almacen->responsable_usuarioid ?? 0)
+        ) {
+            CampoAccess::assertPuedeCrearAlmacenAgricolaPara((int) $data['responsable_usuarioid']);
+        }
 
         $almacen->update($data);
 
@@ -370,7 +386,6 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
         $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
         $eval = \App\Support\AlmacenEliminacionCatalogo::evaluar($almacen);
@@ -424,24 +439,50 @@ class AlmacenController extends Controller
 
     }
 
-    /**
-     * Ownership del almacén mayorista (MAY-02): ver exige que sea propio (o supervisión del admin);
-     * editar/eliminar exige operarlo. Así un mayorista no abre, edita ni se vuelve responsable
-     * de un almacén ajeno cambiando el id en la URL.
-     */
+    /** Lectura por ámbito; gestión solo para el responsable operativo de ese ámbito. */
     private function asegurarAccesoAlmacen(Request $request, Almacen $almacen, string $ambito, bool $gestion): void
     {
-        if ($ambito !== AlmacenAmbito::MAYORISTA) {
-            return;
-        }
+        $this->asegurarAmbitoAlmacen($almacen, $ambito);
 
+        $user = $request->user();
+        abort_if($user === null, 403);
         if ($gestion) {
-            MayoristaAccess::asegurarPuedeGestionar($request->user(), $almacen);
+            abort_unless(UsuarioRol::puedeOperar($user), 403);
+        } elseif (UsuarioRol::esAdminGlobal($user)) {
+            return;
+        }
+
+        if ($ambito === AlmacenAmbito::AGRICOLA) {
+            abort_unless(
+                $gestion ? CampoAccess::puedeGestionarAlmacen($user, $almacen) : CampoAccess::puedeVerAlmacen($user, $almacen),
+                403,
+                'No tiene acceso a este almacén agrícola.'
+            );
 
             return;
         }
 
-        MayoristaAccess::asegurarPuedeVer($request->user(), $almacen);
+        if ($ambito === AlmacenAmbito::PLANTA) {
+            abort_unless(
+                $gestion ? \App\Support\PlantaAccess::puedeGestionarAlmacen($user, $almacen) : \App\Support\PlantaAccess::puedeVerAlmacen($user, $almacen),
+                403,
+                'No tiene acceso a este almacén de planta.'
+            );
+
+            return;
+        }
+
+        if ($ambito === AlmacenAmbito::MAYORISTA) {
+            if ($gestion) {
+                MayoristaAccess::asegurarPuedeGestionar($user, $almacen);
+            } else {
+                MayoristaAccess::asegurarPuedeVer($user, $almacen);
+            }
+
+            return;
+        }
+
+        abort(403);
     }
 
 
@@ -1058,12 +1099,12 @@ class AlmacenController extends Controller
             return MayoristaAccess::scopeAlmacenesMayorista($query, $user);
         }
 
-        if (
-            $ambito === AlmacenAmbito::AGRICOLA
-            && UsuarioRol::esJefeAgricultor($user)
-            && Schema::hasColumn('almacen', 'responsable_usuarioid')
-        ) {
-            return $query->where('responsable_usuarioid', (int) $user->usuarioid);
+        if ($ambito === AlmacenAmbito::AGRICOLA) {
+            return \App\Support\CampoAccess::scopeAlmacenesAgricolas($query, $user);
+        }
+
+        if ($ambito === AlmacenAmbito::PLANTA) {
+            return \App\Support\PlantaAccess::scopeAlmacenesPlanta($query, $user);
         }
 
         return $query;
@@ -1102,4 +1143,3 @@ class AlmacenController extends Controller
     }
 
 }
-

@@ -72,7 +72,7 @@ class ActividadLotePermisosTest extends TestCase
         ]);
     }
 
-    public function test_agricultor_puede_abrir_asignar_actividad_de_su_lote(): void
+    public function test_agricultor_no_puede_abrir_crear_actividad(): void
     {
         TipoActividad::create(['nombre' => 'Riego']);
         $agricultor = $this->createUser('agricultor');
@@ -84,7 +84,7 @@ class ActividadLotePermisosTest extends TestCase
                 'tipo' => 'Riego',
                 'return' => route('lotes.trazabilidad', $lote, absolute: false),
             ]))
-            ->assertOk();
+            ->assertForbidden();
     }
 
     public function test_agricultor_no_puede_asignar_actividad_en_lote_ajeno(): void
@@ -102,8 +102,7 @@ class ActividadLotePermisosTest extends TestCase
                 'loteid' => $lote->loteid,
                 'tipo' => 'Riego',
             ]))
-            ->assertRedirect()
-            ->assertSessionHas('error_modal', true);
+            ->assertForbidden();
     }
 
     public function test_agricultor_ve_lote_donde_participo_en_listado_y_trazabilidad(): void

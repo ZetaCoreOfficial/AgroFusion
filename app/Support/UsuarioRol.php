@@ -131,7 +131,7 @@ final class UsuarioRol
 
     public static function puedeConfirmarRecepcionPlanta(?Usuario $user): bool
     {
-        return self::puedeOperar($user) && $user->hasAnyRole(['planta', 'jefe_planta']);
+        return self::puedeOperar($user) && self::esJefePlanta($user);
     }
 
     public static function esTransportista(?Usuario $user): bool

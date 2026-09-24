@@ -119,12 +119,18 @@ class AsignacionEtapaPlantaService
             throw new \InvalidArgumentException('La maquinaria está en mantenimiento.');
         }
 
-        $operador = UsuarioRol::queryOperariosPlanta()
+        $operador = \App\Support\PlantaAccess::queryOperariosAsignables($asignador)
             ->where('usuarioid', $data['operador_usuarioid'])
             ->first();
 
         if (! $operador || ! UsuarioRol::esOperarioPlanta($operador)) {
-            throw new \InvalidArgumentException('El operario seleccionado debe tener rol planta (no jefe de planta).');
+            throw new \InvalidArgumentException('El operario seleccionado debe tener rol planta (no jefe de planta) y pertenecer a su equipo.');
+        }
+
+        // JPL-05: toda asignación lleva orden del paso actual; nunca null que evade el lock.
+        $orden = $this->transformacion->ordenPasoActual($lote);
+        if ($orden < 1) {
+            throw new \InvalidArgumentException('No se pudo determinar el orden de la etapa a asignar.');
         }
 
         $asignacion = AsignacionEtapaPlanta::create([
@@ -133,6 +139,7 @@ class AsignacionEtapaPlantaService
             'maquinaplantaid' => $data['maquinaplantaid'],
             'operador_usuarioid' => $operador->usuarioid,
             'asignado_por_usuarioid' => $asignador->usuarioid,
+            'orden' => $orden,
             'estado' => AsignacionEtapaPlanta::ESTADO_PENDIENTE,
             'observaciones' => $data['observaciones'] ?? null,
             'creado_en' => now(),
@@ -161,7 +168,7 @@ class AsignacionEtapaPlantaService
             throw new \InvalidArgumentException('Esta etapa no admite cierre de fase en el estado actual.');
         }
 
-        $this->validarFilaPlanEtapa($paso, $etapa);
+        $this->validarFilaPlanEtapa($paso, $etapa, $asignador);
 
         DB::transaction(function () use ($lote, $paso, $etapa, $asignador) {
             $this->crearAsignacionDesdeFilaPlan($lote, $paso, $etapa, $asignador);
@@ -195,7 +202,7 @@ class AsignacionEtapaPlantaService
                 throw new \InvalidArgumentException('Falta la asignación para la etapa '.$paso->orden.'.');
             }
 
-            $this->validarFilaPlanEtapa($paso, $fila);
+            $this->validarFilaPlanEtapa($paso, $fila, $asignador);
         }
 
         DB::transaction(function () use ($lote, $pasosSinAsignar, $porPasoId, $asignador) {
@@ -204,6 +211,28 @@ class AsignacionEtapaPlantaService
                 $this->crearAsignacionDesdeFilaPlan($lote, $paso, $fila, $asignador);
             }
         });
+    }
+
+    /**
+     * PLT-FUNC-01 — asigna todas las etapas pendientes compatibles al mismo operario.
+     * Conserva orden/secuencia; no completa ni salta etapas.
+     */
+    public function asignarTodasPendientesAOperario(
+        LoteProduccionPedido $lote,
+        int $operadorUsuarioId,
+        Usuario $asignador,
+    ): void {
+        $pasos = $this->etapasSinAsignar($lote);
+        if ($pasos->isEmpty()) {
+            throw new \InvalidArgumentException('No hay etapas pendientes de asignar.');
+        }
+
+        $etapas = $pasos->map(fn ($paso) => [
+            'loteproduccionrutapasoid' => (int) $paso->loteproduccionrutapasoid,
+            'operador_usuarioid' => $operadorUsuarioId,
+        ])->values()->all();
+
+        $this->asignarPlanEtapas($lote, $etapas, $asignador);
     }
 
     public function puedeCambiarFase(LoteProduccionPedido $lote, int $loteproduccionrutapasoid): bool
@@ -244,14 +273,16 @@ class AsignacionEtapaPlantaService
     /**
      * @param  array{loteproduccionrutapasoid: int, operador_usuarioid: int, variables?: list<array{variableestandarid: int, valor_minimo: float|int, valor_maximo: float|int}>}  $fila
      */
-    private function validarFilaPlanEtapa(LoteProduccionRutaPaso $paso, array $fila): void
+    private function validarFilaPlanEtapa(LoteProduccionRutaPaso $paso, array $fila, Usuario $asignador): void
     {
-        $operador = UsuarioRol::queryOperariosPlanta()
+        $operador = PlantaAccess::queryOperariosAsignables($asignador)
             ->where('usuarioid', (int) $fila['operador_usuarioid'])
             ->first();
 
         if (! $operador || ! UsuarioRol::esOperarioPlanta($operador)) {
-            throw new \InvalidArgumentException('Etapa '.$paso->orden.': el operario debe tener rol planta.');
+            throw new \InvalidArgumentException(
+                'Etapa '.$paso->orden.': el operario debe tener rol planta y pertenecer a su equipo.'
+            );
         }
 
         if (in_array($paso->proceso?->nombre, ['Control de Calidad'], true)) {
@@ -305,86 +336,87 @@ class AsignacionEtapaPlantaService
     }
 
     /**
-     * @param  array{hora_inicio:string,hora_fin:string}  $data
-     */
-    /**
      * @param  array{hora_inicio: string, hora_fin: string, parametros?: list<array{variableestandarid: int, valor: float|int|string}>}  $data
      */
     public function completar(AsignacionEtapaPlanta $asignacion, array $data, Usuario $usuario): RegistroProcesoMaquinaPlanta
     {
-        $this->activarAsignacionProgramadaSiCorresponde($asignacion);
-
-        if (! $asignacion->estaPendiente()) {
-            throw new \InvalidArgumentException('Esta tarea ya fue completada o aún no está activa.');
-        }
-
-        $esOperador = UsuarioRol::esOperarioPlanta($usuario)
-            && (int) $asignacion->operador_usuarioid === (int) $usuario->usuarioid;
-        $esSupervisor = UsuarioRol::gestionaPlanta($usuario);
-
-        if (! $esOperador && ! $esSupervisor) {
-            throw new \InvalidArgumentException('No tiene permiso para completar esta tarea.');
-        }
-
-        $lote = $asignacion->loteProduccion()->firstOrFail();
-        if ($this->trazabilidad->transformacionCompleta($lote)) {
-            throw new \InvalidArgumentException('La transformación del lote ya finalizó.');
-        }
-
-        $ordenActual = $this->transformacion->ordenPasoActual($lote);
-        if ($asignacion->orden !== null && (int) $asignacion->orden !== $ordenActual) {
-            throw new \InvalidArgumentException(
-                'Esta etapa aún no puede ejecutarse. Complete primero la etapa '.max(1, $ordenActual - 1).'.'
-            );
-        }
-
         $paramService = app(LoteProduccionParametrosService::class);
         $parametrosIngresados = $data['parametros'] ?? [];
-        if ($parametrosIngresados === []) {
-            if ($esOperador) {
-                $parametrosRegistrados = $paramService->parametrosRegistradosDesdePlan($asignacion);
-            } else {
+
+        $registro = DB::transaction(function () use ($asignacion, $data, $usuario, $paramService, $parametrosIngresados) {
+            /** @var AsignacionEtapaPlanta $locked */
+            $locked = AsignacionEtapaPlanta::query()
+                ->whereKey($asignacion->asignacionetapaplantaid)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $this->activarAsignacionProgramadaSiCorresponde($locked);
+            $locked->refresh();
+
+            if (! $locked->estaPendiente()) {
+                throw new \InvalidArgumentException('Esta tarea ya fue completada o aún no está activa.');
+            }
+
+            $esOperador = UsuarioRol::esOperarioPlanta($usuario)
+                && (int) $locked->operador_usuarioid === (int) $usuario->usuarioid;
+
+            if (! $esOperador) {
+                throw new \InvalidArgumentException('No tiene permiso para completar esta tarea.');
+            }
+
+            $lote = $locked->loteProduccion()->lockForUpdate()->firstOrFail();
+            if ($this->trazabilidad->transformacionCompleta($lote)) {
+                throw new \InvalidArgumentException('La transformación del lote ya finalizó.');
+            }
+
+            $ordenActual = $this->transformacion->ordenPasoActual($lote);
+            if ($locked->orden === null || (int) $locked->orden !== $ordenActual) {
+                throw new \InvalidArgumentException(
+                    'Esta etapa aún no puede ejecutarse. Complete primero la etapa '.max(1, $ordenActual - 1).'.'
+                );
+            }
+
+            if ($parametrosIngresados === []) {
+                $requeridos = $paramService->parametrosRequeridosParaAsignacion($locked);
+                if ($requeridos !== []) {
+                    throw new \InvalidArgumentException(
+                        'Debe registrar los parámetros medidos de la etapa. No se generan valores automáticamente.'
+                    );
+                }
                 $parametrosRegistrados = [];
+            } else {
+                $parametrosRegistrados = $paramService->validarYFormatearValoresEtapa(
+                    $locked,
+                    $parametrosIngresados,
+                );
             }
-        } else {
-            $parametrosRegistrados = $paramService->validarYFormatearValoresEtapa(
-                $asignacion,
-                $parametrosIngresados,
-            );
-        }
 
-        $registro = DB::transaction(function () use ($asignacion, $data, $lote, $esSupervisor, $usuario, $parametrosRegistrados) {
             $paso = $this->transformacion->resolverPasoProcesoMaquina(
-                (int) $asignacion->procesoplantaid,
-                (int) $asignacion->maquinaplantaid
+                (int) $locked->procesoplantaid,
+                (int) $locked->maquinaplantaid
             );
 
-            $proceso = $asignacion->proceso;
-            $maquina = $asignacion->maquina;
-            $observaciones = $asignacion->observaciones;
-            if ($esSupervisor && (int) $asignacion->operador_usuarioid !== (int) $usuario->usuarioid) {
-                $observaciones = trim(($observaciones ? $observaciones.' ' : '').'(Completada por '.$usuario->nombreCompleto().')');
-            }
+            $proceso = $locked->proceso;
+            $maquina = $locked->maquina;
 
             $registro = RegistroProcesoMaquinaPlanta::create([
                 'procesomaquinaplantaid' => $paso->procesomaquinaplantaid,
                 'loteproduccionpedidoid' => $lote->loteproduccionpedidoid,
-                'usuarioid' => $asignacion->operador_usuarioid,
+                'usuarioid' => $locked->operador_usuarioid,
                 'variables_ingresadas' => json_encode([
                     'proceso' => $proceso?->nombre,
                     'maquina' => $maquina?->nombre,
-                    'asignacion_id' => $asignacion->asignacionetapaplantaid,
-                    'completada_por_supervisor' => $esSupervisor && (int) $asignacion->operador_usuarioid !== (int) $usuario->usuarioid,
+                    'asignacion_id' => $locked->asignacionetapaplantaid,
                     'parametros' => $parametrosRegistrados,
                 ], JSON_UNESCAPED_UNICODE),
                 'cumple_estandar' => true,
-                'observaciones' => $observaciones,
+                'observaciones' => $locked->observaciones,
                 'hora_inicio' => $data['hora_inicio'],
                 'hora_fin' => $data['hora_fin'],
                 'fecha_registro' => $data['hora_fin'],
             ]);
 
-            $asignacion->update([
+            $locked->update([
                 'estado' => AsignacionEtapaPlanta::ESTADO_COMPLETADA,
                 'registroprocesomaquinaplantaid' => $registro->registroprocesomaquinaplantaid,
                 'completada_en' => now(),
@@ -393,14 +425,14 @@ class AsignacionEtapaPlantaService
             if (! $lote->hora_inicio) {
                 $lote->update(['hora_inicio' => $data['hora_inicio']]);
             }
-            $lote->update(['procesoplantaid' => $asignacion->procesoplantaid]);
+            $lote->update(['procesoplantaid' => $locked->procesoplantaid]);
 
             return $registro;
         });
 
         $this->notificaciones->descartarEtapaPlantaAsignada((int) $asignacion->asignacionetapaplantaid);
 
-        $lote = $lote->fresh();
+        $lote = $asignacion->loteProduccion()->firstOrFail()->fresh();
         $this->promoverSiguienteProgramada($lote);
         $this->transformacion->limpiarAsignacionesObsoletas($lote);
 
@@ -442,24 +474,6 @@ class AsignacionEtapaPlantaService
 
         $siguiente->update(['estado' => AsignacionEtapaPlanta::ESTADO_PENDIENTE]);
         $this->notificaciones->etapaPlantaAsignada($siguiente->fresh());
-    }
-
-    /**
-     * @param  list<array{variableestandarid: int, valor: float|int|string}>  $parametros
-     */
-    public function completarPorSupervisor(AsignacionEtapaPlanta $asignacion, Usuario $supervisor, array $parametros = []): RegistroProcesoMaquinaPlanta
-    {
-        if (! UsuarioRol::gestionaPlanta($supervisor)) {
-            throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede completar etapas desde procesamiento.');
-        }
-
-        $inicio = $asignacion->creado_en ?? now();
-
-        return $this->completar($asignacion, [
-            'hora_inicio' => $inicio->toDateTimeString(),
-            'hora_fin' => now()->toDateTimeString(),
-            'parametros' => $parametros,
-        ], $supervisor);
     }
 
     public function puedeReiniciarTodo(LoteProduccionPedido $lote): bool

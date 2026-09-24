@@ -3,11 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\AlmacenMovimiento;
+use App\Models\DetallePedido;
 use App\Models\DetallePedidoDistribucion;
 use App\Models\DetalleTrasladoPlantaMayorista;
 use App\Models\EnvioAsignacionMultiple;
 use App\Models\FirmaRecepcionEnvio;
 use App\Models\Insumo;
+use App\Models\Pedido;
 use App\Models\PedidoDistribucion;
 use App\Models\RutaDistribucion;
 use App\Models\TipoIncidenteTransporte;
@@ -16,6 +18,7 @@ use App\Services\CierreEnvioAgricolaService;
 use App\Services\CierreEnvioDistribucionPdvService;
 use App\Services\CierreEnvioPlantaMayoristaService;
 use App\Services\RecepcionPuntoVentaService;
+use App\Services\RecepcionPlantaEnvioService;
 use App\Services\SimulacionRutaService;
 use App\Support\AlmacenAmbito;
 use App\Support\PedidoDistribucionCatalogo;
@@ -336,8 +339,24 @@ class Frente3FirmasCierreTest extends TestCase
     public function test_agricola_transportista_no_firma_recepcion_en_planta(): void
     {
         $conductor = $this->conductor(TransportistaFlotaCatalogo::AGRICOLA);
+        $jefeA = $this->actor('jefe_planta');
+        $jefeB = $this->actor('jefe_planta');
+        $almacen = $this->almacen(AlmacenAmbito::PLANTA, $jefeA, 'Planta F3 A');
+        $pedido = Pedido::create([
+            'numero_solicitud' => 'PED-F3-AGR',
+            'nombre_planta' => $almacen->nombre,
+            'direccion_texto' => $almacen->nombre.' · GPS',
+            'latitud' => -17.78, 'longitud' => -63.18,
+            'estado' => 'en_transito', 'fechapedido' => now(),
+        ]);
+        $detalle = DetallePedido::create([
+            'pedidoid' => $pedido->pedidoid,
+            'cultivo_personalizado' => 'Tomate fresco F3',
+            'cantidad' => 10.0,
+        ]);
         $envio = EnvioAsignacionMultiple::create([
             'externo_envio_id' => 'ENV-F3-AGR', 'transportista_usuarioid' => $conductor->usuarioid,
+            'pedidoid' => $pedido->pedidoid,
             'estado' => 'en_transporte_planta', 'fecha_asignacion' => now(), 'llegada_confirmada_at' => now(),
         ]);
         $cierre = app(CierreEnvioAgricolaService::class);
@@ -346,9 +365,22 @@ class Frente3FirmasCierreTest extends TestCase
 
         $this->assertFirmaRechazada(fn () => $cierre->guardarFirmaRecepcion($envio->fresh(), $conductor, self::FIRMA), '/transportista no puede firmar la recepción/');
         $this->assertFirmaRechazada(fn () => $cierre->guardarFirmaRecepcion($envio->fresh(), $this->actor('admin'), self::FIRMA), '/administrador/');
+        $this->assertFirmaRechazada(fn () => $cierre->guardarFirmaRecepcion($envio->fresh(), $this->actor('planta'), self::FIRMA), '/No tiene permiso/');
+        $this->assertFirmaRechazada(fn () => $cierre->guardarFirmaRecepcion($envio->fresh(), $jefeB, self::FIRMA), '/No tiene permiso/');
 
-        $planta = $this->actor('planta');
-        $firma = $cierre->guardarFirmaRecepcion($envio->fresh(), $planta, self::FIRMA);
-        $this->assertSame((int) $planta->usuarioid, (int) $firma->firmante_usuarioid);
+        $firma = $cierre->guardarFirmaRecepcion($envio->fresh(), $jefeA, self::FIRMA);
+        $this->assertSame((int) $jefeA->usuarioid, (int) $firma->firmante_usuarioid);
+        $this->assertNull($envio->fresh()->fecha_recepcion_planta);
+        $this->assertSame(0, AlmacenMovimiento::query()->where('almacenid', $almacen->almacenid)->count());
+        $this->assertEqualsWithDelta(0.0, (float) Insumo::query()->where('almacenid', $almacen->almacenid)->sum('stock'), 0.0001);
+
+        app(RecepcionPlantaEnvioService::class)->confirmarDesdePedido(
+            $pedido->fresh(), $jefeA, [(int) $detalle->detallepedidoid => 8.5]
+        );
+
+        $this->assertNotNull($envio->fresh()->fecha_recepcion_planta);
+        $movimiento = AlmacenMovimiento::query()->where('almacenid', $almacen->almacenid)->sole();
+        $this->assertEqualsWithDelta(8.5, (float) $movimiento->cantidad, 0.0001);
+        $this->assertEqualsWithDelta(8.5, (float) Insumo::query()->where('almacenid', $almacen->almacenid)->sum('stock'), 0.0001);
     }
 }

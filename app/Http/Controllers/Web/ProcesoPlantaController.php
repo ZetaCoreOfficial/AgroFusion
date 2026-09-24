@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\ProcesoPlanta;
+use App\Support\CatalogoTecnicoPlantaAcceso;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -13,8 +14,13 @@ class ProcesoPlantaController extends Controller
     public function __construct()
     {
         $this->middleware(function ($request, $next) {
-            if ($request->user()?->hasRole('agricultor') || $request->user()?->hasRole('transportista')) {
-                abort(403);
+            $user = $request->user();
+            $method = $request->route()?->getActionMethod();
+
+            if (in_array($method, ['store', 'update', 'destroy', 'create', 'edit'], true)) {
+                abort_unless(CatalogoTecnicoPlantaAcceso::puedeGestionar($user), 403);
+            } else {
+                abort_unless(CatalogoTecnicoPlantaAcceso::puedeAdministrar($user), 403);
             }
 
             return $next($request);

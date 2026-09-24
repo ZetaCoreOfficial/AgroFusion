@@ -321,9 +321,7 @@ class LoteProduccionTransformacionService
             ->with(['proceso', 'maquina', 'operador']);
 
         if (Schema::hasColumn('asignacion_etapa_planta', 'orden')) {
-            $query->where(function ($q) use ($ordenActual) {
-                $q->where('orden', $ordenActual)->orWhereNull('orden');
-            });
+            $query->where('orden', $ordenActual);
         }
 
         $paso = $this->pasoPlantillaActual($lote);
