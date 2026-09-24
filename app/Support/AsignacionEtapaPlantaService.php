@@ -119,12 +119,12 @@ class AsignacionEtapaPlantaService
             throw new \InvalidArgumentException('La maquinaria está en mantenimiento.');
         }
 
-        $operador = UsuarioRol::queryOperariosPlanta()
+        $operador = \App\Support\PlantaAccess::queryOperariosAsignables($asignador)
             ->where('usuarioid', $data['operador_usuarioid'])
             ->first();
 
         if (! $operador || ! UsuarioRol::esOperarioPlanta($operador)) {
-            throw new \InvalidArgumentException('El operario seleccionado debe tener rol planta (no jefe de planta).');
+            throw new \InvalidArgumentException('El operario seleccionado debe tener rol planta (no jefe de planta) y pertenecer a su equipo.');
         }
 
         $asignacion = AsignacionEtapaPlanta::create([

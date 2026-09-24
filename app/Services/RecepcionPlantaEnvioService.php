@@ -103,10 +103,6 @@ class RecepcionPlantaEnvioService
 
         $almacen = $this->resolverAlmacenPlantaDesdePedido($pedido);
 
-        if ($almacen === null) {
-            throw new \InvalidArgumentException('No se encontró un almacén de planta destino.');
-        }
-
         $tipoIngreso = $this->tipoMovimientoIngresoRecepcion();
         $numeroSolicitud = (string) $pedido->numero_solicitud;
 
@@ -162,7 +158,7 @@ class RecepcionPlantaEnvioService
         });
     }
 
-    private function resolverAlmacenPlantaDesdePedido(Pedido $pedido): ?Almacen
+    private function resolverAlmacenPlantaDesdePedido(Pedido $pedido): Almacen
     {
         $texto = (string) ($pedido->direccion_texto ?? '');
         $nombre = trim(explode('·', $texto)[0]);
@@ -173,14 +169,27 @@ class RecepcionPlantaEnvioService
             AlmacenAmbito::PLANTA
         );
 
-        if ($nombre !== '') {
-            $coincidencia = (clone $query)->where('nombre', 'like', '%'.$nombre.'%')->first();
-            if ($coincidencia !== null) {
-                return $coincidencia;
-            }
+        if ($nombre === '') {
+            throw new \InvalidArgumentException(
+                'No se pudo determinar el almacén de planta destino del pedido. Indique un destino inequívoco.'
+            );
         }
 
-        return $query->orderBy('nombre')->first();
+        $coincidencias = (clone $query)->where('nombre', 'like', '%'.$nombre.'%')->get();
+
+        if ($coincidencias->count() === 1) {
+            return $coincidencias->first();
+        }
+
+        if ($coincidencias->count() > 1) {
+            throw new \InvalidArgumentException(
+                'Hay varios almacenes de planta que coinciden con «'.$nombre.'». Especifique el destino exacto.'
+            );
+        }
+
+        throw new \InvalidArgumentException(
+            'No se encontró un almacén de planta destino para «'.$nombre.'».'
+        );
     }
 
     private function crearInsumoRecepcionEnAlmacen(

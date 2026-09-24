@@ -262,7 +262,7 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito']);
 
         $almacen->load(['unidadMedida', 'almacenamientos']);
 
@@ -305,7 +305,7 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito']);
 
 
 
@@ -329,7 +329,7 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito']);
 
 
 
@@ -373,7 +373,7 @@ class AlmacenController extends Controller
 
         $ctx = AlmacenAmbito::contexto($request);
 
-        $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito']);
 
         $eval = \App\Support\AlmacenEliminacionCatalogo::evaluar($almacen);
         if (! $eval['ok']) {
@@ -424,6 +424,39 @@ class AlmacenController extends Controller
 
         }
 
+    }
+
+    private function asegurarAccesoAlmacen(Request $request, Almacen $almacen, string $ambito): void
+    {
+        $this->asegurarAmbitoAlmacen($almacen, $ambito);
+
+        $user = $request->user();
+        if (! $user || UsuarioRol::esAdminGlobal($user)) {
+            return;
+        }
+
+        if (
+            $ambito === AlmacenAmbito::AGRICOLA
+            && UsuarioRol::esJefeAgricultor($user)
+            && Schema::hasColumn('almacen', 'responsable_usuarioid')
+        ) {
+            abort_unless(
+                (int) ($almacen->responsable_usuarioid ?? 0) === (int) $user->usuarioid,
+                403,
+                'No puede operar un almacén agrícola que no le pertenece.'
+            );
+        }
+
+        if (
+            $ambito === AlmacenAmbito::PLANTA
+            && (UsuarioRol::esJefePlanta($user) || UsuarioRol::esOperarioPlanta($user))
+        ) {
+            abort_unless(
+                \App\Support\PlantaAccess::puedeVerAlmacen($user, $almacen),
+                403,
+                'No puede operar un almacén de planta fuera de su alcance.'
+            );
+        }
     }
 
 
@@ -1046,6 +1079,10 @@ class AlmacenController extends Controller
             && Schema::hasColumn('almacen', 'responsable_usuarioid')
         ) {
             return $query->where('responsable_usuarioid', (int) $user->usuarioid);
+        }
+
+        if ($ambito === AlmacenAmbito::PLANTA) {
+            return \App\Support\PlantaAccess::scopeAlmacenesPlanta($query, $user);
         }
 
         return $query;

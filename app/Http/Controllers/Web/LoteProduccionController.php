@@ -128,7 +128,7 @@ class LoteProduccionController extends Controller
             $pedidoLabel = Pedido::find(old('pedidoid'))?->numero_solicitud ?? '';
         }
 
-        $almacenes = AlmacenAmbito::scope(Almacen::query(), AlmacenAmbito::PLANTA)
+        $almacenes = \App\Support\PlantaAccess::scopeAlmacenesPlanta(Almacen::query(), $request->user())
             ->where('activo', true)
             ->orderBy('nombre')
             ->get();
@@ -208,9 +208,9 @@ class LoteProduccionController extends Controller
         $procesosUsadosIds = $this->transformacion->procesosRegistradosIds($loteProduccion);
         $maquinasPlanta = MaquinaPlanta::query()->where('activo', true)->orderBy('nombre')->get();
         $mapaCompatibilidad = MaquinaProcesoCompatibilidad::mapaSelectores();
-        $almacenesPlanta = AlmacenAmbito::scope(
+        $almacenesPlanta = \App\Support\PlantaAccess::scopeAlmacenesPlanta(
             Almacen::with(['tipoAlmacen', 'unidadMedida', 'almacenamientos'])->where('activo', true),
-            AlmacenAmbito::PLANTA
+            auth()->user()
         )->orderBy('nombre')->get();
         $resumenesCapacidadPlanta = [];
         foreach ($almacenesPlanta as $almacenPlanta) {
@@ -260,7 +260,7 @@ class LoteProduccionController extends Controller
         $puedeAsignarEtapa = UsuarioRol::gestionaPlanta($user) || $user?->hasRole('admin');
         $puedeCertificar = $puedeAsignarEtapa;
         $operadoresPlanta = $puedeAsignarEtapa
-            ? UsuarioRol::queryOperariosPlanta()->orderBy('nombre')->orderBy('apellido')->get()
+            ? \App\Support\PlantaAccess::queryOperariosAsignables($user)->orderBy('nombre')->orderBy('apellido')->get()
             : collect();
         $asignacionesPendientesLote = $this->transformacion->asignacionesPendientes($loteProduccion);
 
@@ -1073,7 +1073,7 @@ class LoteProduccionController extends Controller
         $fase = $this->trazabilidad->resolverFaseActual($loteProduccion);
         $puedeEditarMaterias = $this->loteService->puedeEditarMaterias($loteProduccion);
 
-        $almacenes = AlmacenAmbito::scope(Almacen::query(), AlmacenAmbito::PLANTA)
+        $almacenes = \App\Support\PlantaAccess::scopeAlmacenesPlanta(Almacen::query(), auth()->user())
             ->where('activo', true)
             ->orderBy('nombre')
             ->get();
