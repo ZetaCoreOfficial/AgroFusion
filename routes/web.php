@@ -447,7 +447,7 @@ Route::middleware(['auth', 'cuenta.aprobada'])->group(function () {
     Route::post('/certificaciones/masivo', [CertificacionController::class, 'storeBatch'])->name('certificaciones.store-bulk')->middleware('action.permission:certificaciones,create');
     Route::post('/certificaciones', [CertificacionController::class, 'store'])->name('certificaciones.store')->middleware('action.permission:certificaciones,create');
     Route::get('/certificaciones/{certificacion}', [CertificacionController::class, 'show'])->name('certificaciones.show')->middleware('action.permission:certificaciones,read');
-    Route::post('/certificaciones/{certificacion}/blockchain/sincronizar', [CertificacionController::class, 'sincronizarBlockchain'])->name('certificaciones.blockchain.sincronizar')->middleware('action.permission:certificaciones,read');
+    Route::post('/certificaciones/{certificacion}/blockchain/sincronizar', [CertificacionController::class, 'sincronizarBlockchain'])->name('certificaciones.blockchain.sincronizar')->middleware('action.permission:certificaciones,update');
 
     Route::get('/certificaciones-planta', [CertificacionPlantaController::class, 'index'])->name('certificaciones-planta.index')->middleware('action.permission:lote_produccion,read');
     Route::get('/certificaciones-planta/{evaluacionFinalLoteProduccion}', [CertificacionPlantaController::class, 'show'])->name('certificaciones-planta.show')->middleware('action.permission:lote_produccion,read');
