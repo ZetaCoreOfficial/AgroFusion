@@ -11,13 +11,9 @@
 @endif
 @if(($item['fase_logistica'] ?? null) === 'en_camino_planta' && ! $item['asignacion'] && $item['pedido'])
     @can('recepcion_planta.confirm')
-    <form method="POST" action="{{ route('pedidos.confirmar-llegada-planta', $item['pedido']) }}" class="d-inline m-0">
-        @csrf
-        <button type="button" class="btn btn-sm btn-outline-success" data-confirm-modal
-            data-confirm-tone="success" data-confirm-title="Confirmar llegada"
-            data-confirm-message="¿Confirma llegada del pedido {{ $item['pedido']->numero_solicitud }} a planta?">
-            <i class="fas fa-check mr-1"></i> Llegada
-        </button>
-    </form>
+    <a href="{{ route('pedidos.show', $item['pedido']) }}#pesaje-recepcion"
+       class="btn btn-sm btn-outline-success" title="Confirmar llegada con pesaje">
+        <i class="fas fa-weight mr-1"></i> Pesaje
+    </a>
     @endcan
 @endif

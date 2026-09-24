@@ -50,6 +50,7 @@ class ActividadController extends Controller
             'usuarioid' => 'nullable|exists:usuario,usuarioid',
             'descripcion' => 'required|string|max:200',
             'fechainicio' => 'nullable|date',
+            'fecha_planificada' => 'nullable|date',
             'fechafin' => 'nullable|date',
             'tipoactividadid' => 'required|exists:tipoactividad,tipoactividadid',
             'prioridadid' => 'required|exists:prioridad,prioridadid',
@@ -67,6 +68,10 @@ class ActividadController extends Controller
         abort_unless($permitido, 403, 'No tienes acceso a este lote.');
 
         $data['usuarioid'] = (int) ($data['usuarioid'] ?? $user->usuarioid);
+        if (empty($data['fechainicio'])) {
+            $data['fechainicio'] = now();
+        }
+        $data['fechafin'] = $data['fechafin'] ?? null;
 
         $actividad = Actividad::create($data);
 
@@ -90,6 +95,7 @@ class ActividadController extends Controller
             'usuarioid' => 'sometimes|exists:usuario,usuarioid',
             'descripcion' => 'sometimes|string|max:200',
             'fechainicio' => 'nullable|date',
+            'fecha_planificada' => 'nullable|date',
             'fechafin' => 'nullable|date',
             'tipoactividadid' => 'sometimes|exists:tipoactividad,tipoactividadid',
             'prioridadid' => 'sometimes|exists:prioridad,prioridadid',

@@ -607,21 +607,39 @@ class PedidoController extends Controller
         return back()->with('success', 'Carga confirmada. El envío está en camino hacia planta.');
     }
 
-    public function confirmarLlegadaPlanta(Pedido $pedido, RecepcionPlantaEnvioService $recepcionService): RedirectResponse
+    public function confirmarLlegadaPlanta(Request $request, Pedido $pedido, RecepcionPlantaEnvioService $recepcionService): RedirectResponse
     {
         abort_unless(
-            \App\Support\UsuarioRol::puedeConfirmarRecepcionPlanta(auth()->user()),
+            UsuarioRol::puedeConfirmarRecepcionPlanta($request->user()),
             403,
             'Solo el jefe de planta puede confirmar la recepción.'
         );
 
-        try {
-            $recepcionService->confirmarDesdePedido($pedido, auth()->user());
-        } catch (\InvalidArgumentException $e) {
-            return back()->with('error', $e->getMessage());
+        $pedido->loadMissing('detalles');
+        $rules = [
+            'cantidades' => ['required', 'array', 'min:1'],
+        ];
+        foreach ($pedido->detalles as $det) {
+            $rules['cantidades.'.$det->detallepedidoid] = ['required', 'numeric', 'gt:0'];
         }
 
-        return back()->with('success', "Pedido {$pedido->numero_solicitud} recibido en planta. La carga se registró en el almacén de destino.");
+        $data = $request->validate($rules, [
+            'cantidades.required' => 'Indique la cantidad recibida (pesaje) de cada producto.',
+            'cantidades.*.gt' => 'La cantidad recibida debe ser mayor que 0.',
+        ]);
+
+        $cantidades = [];
+        foreach ($data['cantidades'] as $detalleId => $kg) {
+            $cantidades[(int) $detalleId] = (float) $kg;
+        }
+
+        try {
+            $recepcionService->confirmarDesdePedido($pedido, $request->user(), $cantidades);
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage())->withInput();
+        }
+
+        return back()->with('success', "Pedido {$pedido->numero_solicitud} recibido en planta con pesaje registrado.");
     }
 
     /**

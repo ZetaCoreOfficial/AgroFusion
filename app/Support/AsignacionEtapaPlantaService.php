@@ -213,6 +213,28 @@ class AsignacionEtapaPlantaService
         });
     }
 
+    /**
+     * PLT-FUNC-01 — asigna todas las etapas pendientes compatibles al mismo operario.
+     * Conserva orden/secuencia; no completa ni salta etapas.
+     */
+    public function asignarTodasPendientesAOperario(
+        LoteProduccionPedido $lote,
+        int $operadorUsuarioId,
+        Usuario $asignador,
+    ): void {
+        $pasos = $this->etapasSinAsignar($lote);
+        if ($pasos->isEmpty()) {
+            throw new \InvalidArgumentException('No hay etapas pendientes de asignar.');
+        }
+
+        $etapas = $pasos->map(fn ($paso) => [
+            'loteproduccionrutapasoid' => (int) $paso->loteproduccionrutapasoid,
+            'operador_usuarioid' => $operadorUsuarioId,
+        ])->values()->all();
+
+        $this->asignarPlanEtapas($lote, $etapas, $asignador);
+    }
+
     public function puedeCambiarFase(LoteProduccionPedido $lote, int $loteproduccionrutapasoid): bool
     {
         if ($this->trazabilidad->transformacionCompleta($lote)) {

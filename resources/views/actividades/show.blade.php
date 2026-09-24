@@ -25,10 +25,17 @@
                 <p><strong>Prioridad:</strong> {{ $actividad->prioridad->nombre ?? '—' }}</p>
             </div>
             <div class="col-md-6">
-                <p><strong>Fecha inicio:</strong>
+                <p><strong>Fecha planificada:</strong>
+                    @if($actividad->fecha_planificada)
+                        {{ \Carbon\Carbon::parse($actividad->fecha_planificada)->format('d/m/Y') }}
+                    @else
+                        <span class="text-muted">—</span>
+                    @endif
+                </p>
+                <p><strong>Fecha inicio real:</strong>
                     {{ $actividad->fechainicio ? \Carbon\Carbon::parse($actividad->fechainicio)->format('d/m/Y H:i') : '—' }}
                 </p>
-                <p><strong>Fecha fin:</strong>
+                <p><strong>Fecha fin real:</strong>
                     @if($completada)
                         {{ \Carbon\Carbon::parse($actividad->fechafin)->format('d/m/Y H:i') }}
                     @else

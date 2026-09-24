@@ -401,6 +401,29 @@ class LoteProduccionController extends Controller
             ->with('success', 'Todas las fases pendientes fueron cerradas. Los operarios ejecutarán las etapas en orden.');
     }
 
+    public function asignarTodasPendientes(Request $request, LoteProduccionPedido $loteProduccion): RedirectResponse
+    {
+        abort_unless(UsuarioRol::gestionaPlanta($request->user()) || $request->user()?->hasRole('admin'), 403);
+
+        $data = $request->validate([
+            'operador_usuarioid' => ['required', 'integer', 'exists:usuario,usuarioid'],
+        ]);
+
+        try {
+            $this->asignacionEtapa->asignarTodasPendientesAOperario(
+                $loteProduccion,
+                (int) $data['operador_usuarioid'],
+                $request->user(),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage())->withInput();
+        }
+
+        return redirect()
+            ->route('procesamiento.show', $loteProduccion)
+            ->with('success', 'Todas las etapas pendientes fueron asignadas al operario. Se ejecutarán en orden.');
+    }
+
     public function cerrarFase(Request $request, LoteProduccionPedido $loteProduccion): RedirectResponse|JsonResponse
     {
         abort_unless(UsuarioRol::gestionaPlanta($request->user()) || $request->user()?->hasRole('admin'), 403);

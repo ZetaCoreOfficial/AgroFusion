@@ -481,6 +481,7 @@ class ActividadController extends Controller
             'tipoactividadid' => 'required|exists:tipoactividad,tipoactividadid',
             'prioridadid' => 'nullable|exists:prioridad,prioridadid',
             'fechainicio' => 'nullable|date',
+            'fecha_planificada' => 'nullable|date',
             'fechafin' => 'nullable|date|after_or_equal:fechainicio',
             'observaciones' => 'nullable|string|max:250',
             'detalle_actividad_json' => 'nullable|string',
@@ -549,6 +550,7 @@ class ActividadController extends Controller
                 : null,
             'descripcion' => $data['descripcion'],
             'fechainicio' => $data['fechainicio'] ?? now(),
+            'fecha_planificada' => $data['fecha_planificada'] ?? null,
             'fechafin' => null,
             'tipoactividadid' => $data['tipoactividadid'],
             'prioridadid' => $data['prioridadid'],
@@ -687,6 +689,7 @@ class ActividadController extends Controller
             'loteid' => 'required|exists:lote,loteid',
             'descripcion' => 'required|string|max:200',
             'fechainicio' => 'nullable|date',
+            'fecha_planificada' => 'nullable|date',
             'fechafin' => 'nullable|date|after_or_equal:fechainicio',
             'tipoactividadid' => 'required|exists:tipoactividad,tipoactividadid',
             'prioridadid' => 'required|exists:prioridad,prioridadid',
@@ -696,6 +699,11 @@ class ActividadController extends Controller
         $lote = Lote::findOrFail($data['loteid']);
         $responsableAnterior = (int) $actividad->usuarioid;
         $data['usuarioid'] = $this->resolverUsuarioidActividad($request, $lote);
+
+        // OPA-09: editar planificación no debe alterar fechafin real.
+        if (! array_key_exists('fechafin', $data) || $data['fechafin'] === null || $data['fechafin'] === '') {
+            unset($data['fechafin']);
+        }
 
         $actividad->update($data);
         $actividad->refresh();
@@ -1053,12 +1061,15 @@ class ActividadController extends Controller
         $lote = $act->lote->nombre ?? 'Sin lote';
         $pendiente = $act->fechafin === null;
         $inicio = Carbon::parse($act->fechainicio);
+        $plan = $act->fecha_planificada
+            ? Carbon::parse($act->fecha_planificada)
+            : $inicio;
         $hora = $inicio->format('H:i');
 
         return [
             'id' => (string) $act->actividadid,
             'title' => $tipo.' — '.$lote,
-            'start' => $inicio->format('Y-m-d'),
+            'start' => $plan->format('Y-m-d'),
             'allDay' => true,
             'extendedProps' => [
                 'id' => $act->actividadid,
@@ -1071,6 +1082,9 @@ class ActividadController extends Controller
                 'hora' => $hora,
                 'horaTimestamp' => $inicio->timestamp,
                 'fechainicioFmt' => $inicio->format('d/m/Y H:i'),
+                'fechaPlanificadaFmt' => $act->fecha_planificada
+                    ? Carbon::parse($act->fecha_planificada)->format('d/m/Y')
+                    : null,
                 'fechafin' => $pendiente ? null : Carbon::parse($act->fechafin)->format('d/m/Y H:i'),
                 'pendiente' => $pendiente,
                 'observaciones' => $act->observaciones ?: $act->descripcion,

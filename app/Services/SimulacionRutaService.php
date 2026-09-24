@@ -24,7 +24,6 @@ class SimulacionRutaService
     public function __construct(
         private readonly RutaPorCallesService $rutasCalles,
         private readonly DistribucionRutaService $distribucion,
-        private readonly RecepcionPlantaEnvioService $recepcionPlanta,
         private readonly RecepcionPuntoVentaService $recepcionPdv,
         private readonly NotificacionUsuarioService $notificaciones,
     ) {}
@@ -319,21 +318,16 @@ class SimulacionRutaService
             return;
         }
 
-        $envio->loadMissing('pedido');
-        $transportista = $envio->transportista ?? Usuario::query()->find($envio->transportista_usuarioid);
-
-        if ($envio->pedido && $transportista) {
-            $this->recepcionPlanta->confirmarDesdePedido($envio->pedido, $transportista);
-            $envio->refresh();
-            $this->notificaciones->simulacionCompletadaAgricola($envio->fresh(['pedido', 'transportista']));
-
-            return;
+        // JPL-08: fin de simulación ≠ recepción en planta. Solo confirma llegada;
+        // el stock lo acredita el jefe con pesaje (confirmarDesdePedido + cantidades).
+        if ($envio->llegada_confirmada_at === null) {
+            $attrs = ['llegada_confirmada_at' => now()];
+            if (\Illuminate\Support\Facades\Schema::hasColumn($envio->getTable(), 'llegada_confirmada_usuarioid')) {
+                $attrs['llegada_confirmada_usuarioid'] = $envio->transportista_usuarioid;
+            }
+            $envio->update($attrs);
         }
 
-        $envio->update(EnvioAsignacionEstadoCatalogo::applyToAttributes([
-            'estado' => 'recibido_planta',
-            'fecha_recepcion_planta' => now(),
-        ]));
         $this->notificaciones->simulacionCompletadaAgricola($envio->fresh(['pedido', 'transportista']));
     }
 
@@ -421,16 +415,23 @@ class SimulacionRutaService
             && $this->segundosTranscurridos($ruta->simulacion_inicio_at) >= $duracion;
     }
 
+    /**
+     * Fallback de simulación: nunca marca recibido_planta ni acredita stock (JPL-08).
+     */
     private function marcarRecepcionMinimaAgricola(EnvioAsignacionMultiple $envio): void
     {
         if (EnvioAsignacionEstadoCatalogo::llegoADestino($envio)) {
             return;
         }
 
-        $envio->update(EnvioAsignacionEstadoCatalogo::applyToAttributes([
-            'estado' => 'recibido_planta',
-            'fecha_recepcion_planta' => now(),
-        ]));
+        if ($envio->llegada_confirmada_at === null) {
+            $attrs = ['llegada_confirmada_at' => now()];
+            if (\Illuminate\Support\Facades\Schema::hasColumn($envio->getTable(), 'llegada_confirmada_usuarioid')) {
+                $attrs['llegada_confirmada_usuarioid'] = $envio->transportista_usuarioid;
+            }
+            $envio->update($attrs);
+        }
+
         $this->notificaciones->simulacionCompletadaAgricola($envio->fresh(['pedido', 'transportista']));
     }
 

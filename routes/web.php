@@ -268,6 +268,9 @@ Route::middleware(['auth', 'cuenta.aprobada'])->group(function () {
     Route::post('procesamiento/{loteProduccion}/asignar-plan-etapas', [\App\Http\Controllers\Web\LoteProduccionController::class, 'asignarPlanEtapas'])
         ->name('procesamiento.asignar-plan-etapas')
         ->middleware('action.permission:lote_produccion,create');
+    Route::post('procesamiento/{loteProduccion}/asignar-todas-pendientes', [\App\Http\Controllers\Web\LoteProduccionController::class, 'asignarTodasPendientes'])
+        ->name('procesamiento.asignar-todas-pendientes')
+        ->middleware('action.permission:lote_produccion,create');
     Route::post('procesamiento/{loteProduccion}/cerrar-fase', [\App\Http\Controllers\Web\LoteProduccionController::class, 'cerrarFase'])
         ->name('procesamiento.cerrar-fase')
         ->middleware('action.permission:lote_produccion,create');

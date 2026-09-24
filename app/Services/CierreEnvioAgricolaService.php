@@ -25,7 +25,6 @@ use InvalidArgumentException;
 class CierreEnvioAgricolaService
 {
     public function __construct(
-        private readonly RecepcionPlantaEnvioService $recepcionPlanta,
         private readonly SimulacionRutaService $simulacion,
     ) {}
 
@@ -97,7 +96,9 @@ class CierreEnvioAgricolaService
             'puede_firmar_transportista' => $llegadaConfirmada && $tieneIncidentes && ! $recibido && ! $firmaTransportista,
             'puede_firmar_recepcion' => $llegadaConfirmada && $tieneIncidentes && ! $recibido
                 && $firmaTransportista && ! $firmaRecepcion,
-            'puede_finalizar' => $llegadaConfirmada && $tieneIncidentes && $firmaTransportista && $firmaRecepcion && ! $recibido,
+            // JPL-08: el documento se finaliza tras el pesaje del jefe (no acredita stock aquí).
+            'puede_finalizar' => $llegadaConfirmada && $tieneIncidentes && $firmaTransportista && $firmaRecepcion && $recibido,
+            'espera_pesaje_planta' => $llegadaConfirmada && $tieneIncidentes && $firmaTransportista && $firmaRecepcion && ! $recibido,
         ], $envio);
     }
 
@@ -308,21 +309,26 @@ class CierreEnvioAgricolaService
             }
         }
 
+        $envio->loadMissing('pedido');
+
+        if ($envio->pedido === null) {
+            throw new InvalidArgumentException('El envío no tiene pedido asociado para registrar la recepción en planta.');
+        }
+
+        // JPL-08: stock/recepción solo vía pesaje del jefe; aquí solo se emite el documento.
+        if ($envio->fecha_recepcion_planta === null) {
+            throw new InvalidArgumentException(
+                'El jefe de planta debe confirmar el pesaje (cantidad recibida) antes de finalizar el documento de entrega.'
+            );
+        }
+
         $resumen = $this->resumenPasos($envio);
 
         if (! ($resumen['puede_finalizar'] ?? false)) {
-            throw new InvalidArgumentException('Complete condiciones, llegada, incidentes y firmas antes de finalizar.');
+            throw new InvalidArgumentException('Complete condiciones, llegada, incidentes, firmas y pesaje en planta antes de finalizar.');
         }
 
-        $envio->loadMissing('pedido');
-
         $documento = DB::transaction(function () use ($envio, $usuario) {
-            if ($envio->pedido) {
-                $this->recepcionPlanta->confirmarDesdePedido($envio->pedido, $usuario);
-            } else {
-                throw new InvalidArgumentException('El envío no tiene pedido asociado para registrar la recepción en planta.');
-            }
-
             $envio->refresh();
 
             return $this->generarDocumentoTransporte($envio, $usuario);
