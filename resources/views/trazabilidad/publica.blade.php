@@ -457,6 +457,14 @@
                             </ul>
                             @endif
                             @php
+                                $esFotoReferenciaPub = false;
+                                foreach (['evidencia_url', 'evidencia_foto_url'] as $campoFotoPub) {
+                                    $referenciaPub = \App\Support\TrazabilidadFotoReferencia::paraUrl($evento[$campoFotoPub] ?? null);
+                                    if ($referenciaPub) {
+                                        $evento[$campoFotoPub] = $referenciaPub;
+                                        $esFotoReferenciaPub = true;
+                                    }
+                                }
                                 $tipoEvidenciaPub = (string) ($evento['evidencia_tipo'] ?? '');
                                 $urlInsumoPub = ($tipoEvidenciaPub === 'insumo' || $tipoEvidenciaPub === 'insumo_foto')
                                     ? ($evento['evidencia_url'] ?? null)
@@ -483,11 +491,11 @@
                                     @if(filled($urlFotoPub))
                                     <a href="{{ $urlFotoPub }}" class="trz-evidencia-card trz-evidencia-open" target="_blank" rel="noopener"
                                        data-url="{{ $urlFotoPub }}" data-titulo="{{ $evento['titulo'] }}">
-                                        <img src="{{ $urlFotoPub }}" alt="{{ $tipoEvidenciaPub === 'maquina' ? 'Equipo' : 'Evidencia' }}: {{ $evento['titulo'] }}"
+                                        <img src="{{ $urlFotoPub }}" alt="{{ $tipoEvidenciaPub === 'maquina' ? 'Equipo' : ($esFotoReferenciaPub ? 'Referencia' : 'Evidencia') }}: {{ $evento['titulo'] }}"
                                              decoding="async" loading="lazy" referrerpolicy="no-referrer">
                                         <span class="trz-evidencia-caption">
                                             <span><i class="fas fa-{{ $tipoEvidenciaPub === 'maquina' ? 'cogs' : 'camera' }} mr-1"></i>
-                                                {{ $tipoEvidenciaPub === 'maquina' ? 'Equipo de planta' : 'Evidencia fotográfica' }}</span>
+                                                {{ $tipoEvidenciaPub === 'maquina' ? 'Equipo de planta' : ($esFotoReferenciaPub ? 'Imagen de referencia' : 'Evidencia fotográfica') }}</span>
                                             <span><i class="fas fa-expand-alt"></i></span>
                                         </span>
                                     </a>
