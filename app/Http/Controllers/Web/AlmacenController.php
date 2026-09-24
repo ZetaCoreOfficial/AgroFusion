@@ -44,6 +44,8 @@ use App\Support\AlmacenPlantaCosechaCatalogo;
 
 use App\Support\AlmacenResponsableCatalogo;
 
+use App\Support\CampoAccess;
+
 use App\Support\InsumoCatalogo;
 
 use App\Support\MayoristaAccess;
@@ -250,7 +252,9 @@ class AlmacenController extends Controller
             $data['responsable_usuarioid'] = $this->resolverResponsableAlmacen($request, $ctx['ambito'], $data);
         }
 
-
+        if ($ctx['ambito'] === AlmacenAmbito::AGRICOLA && Schema::hasColumn('almacen', 'responsable_usuarioid')) {
+            CampoAccess::assertPuedeCrearAlmacenAgricolaPara((int) $data['responsable_usuarioid']);
+        }
 
         Almacen::create($data);
 
@@ -361,7 +365,13 @@ class AlmacenController extends Controller
             $data['responsable_usuarioid'] = $this->resolverResponsableAlmacen($request, $ctx['ambito'], $data);
         }
 
-
+        if (
+            $ctx['ambito'] === AlmacenAmbito::AGRICOLA
+            && Schema::hasColumn('almacen', 'responsable_usuarioid')
+            && (int) $data['responsable_usuarioid'] !== (int) ($almacen->responsable_usuarioid ?? 0)
+        ) {
+            CampoAccess::assertPuedeCrearAlmacenAgricolaPara((int) $data['responsable_usuarioid']);
+        }
 
         $almacen->update($data);
 

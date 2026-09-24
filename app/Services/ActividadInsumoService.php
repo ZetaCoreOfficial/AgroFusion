@@ -3,17 +3,22 @@
 namespace App\Services;
 
 use App\Models\Actividad;
+use App\Models\Almacen;
+use App\Models\AlmacenMovimiento;
 use App\Models\EstadoLoteInsumo;
 use App\Models\Insumo;
 use App\Models\Lote;
 use App\Models\LoteInsumo;
 use App\Models\TipoInsumo;
+use App\Models\TipoMovimientoAlmacen;
 use App\Support\ActividadDetalleCatalogo;
+use App\Support\CampoAccess;
 use App\Support\InsumoCatalogo;
 use App\Support\InsumoImagenCatalogo;
 use App\Support\PedidoCatalogo;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class ActividadInsumoService
@@ -37,7 +42,7 @@ class ActividadInsumoService
      * @param  array<string, mixed>  $detalle
      * @return array<string, mixed>
      */
-    public function validarDetalle(array $detalle, ?string $tipoActividadNombre): array
+    public function validarDetalle(array $detalle, ?string $tipoActividadNombre, ?Lote $lote = null): array
     {
         if (ActividadDetalleCatalogo::esRiego($tipoActividadNombre)) {
             $tipoRiego = trim((string) ($detalle['riego']['key'] ?? ''));
@@ -81,12 +86,22 @@ class ActividadInsumoService
             ]);
         }
 
+        $almacen = $lote ? CampoAccess::almacenAgricolaParaLote($lote) : null;
+
         $normalizados = [];
         foreach ($filas as $fila) {
             $insumo = Insumo::query()->with(['tipo', 'unidadMedida'])->find((int) $fila['insumoid']);
             if ($insumo === null || ! InsumoCatalogo::esInsumoOperativo($insumo)) {
                 throw ValidationException::withMessages([
                     'detalle_actividad_json' => 'Uno de los insumos seleccionados no es válido.',
+                ]);
+            }
+
+            if ($almacen !== null) {
+                $this->assertInsumoDeAlmacenOperativo($insumo, $almacen);
+            } elseif (Schema::hasColumn('insumo', 'almacenid') && $insumo->almacenid === null) {
+                throw ValidationException::withMessages([
+                    'detalle_actividad_json' => 'El insumo «'.$insumo->nombre.'» es legacy (sin almacén) y no puede usarse en consumo agrícola operativo.',
                 ]);
             }
 
@@ -118,17 +133,21 @@ class ActividadInsumoService
                 'nombre' => $insumo->nombre,
                 'cantidad' => $cantidad,
                 'unidad' => $unidad,
+                'almacenid' => $insumo->almacenid ? (int) $insumo->almacenid : null,
             ];
         }
 
         return [
             'modo' => 'insumos',
             'insumos' => $normalizados,
+            'almacenid' => $almacen?->almacenid,
             'stock_aplicado' => false,
         ];
     }
 
     /**
+     * OPA-08 — descuenta solo de la existencia del almacén agrícola del lote.
+     *
      * @param  array<string, mixed>  $detalle
      */
     public function aplicarStockSiCorresponde(Actividad $actividad, array &$detalle): void
@@ -138,22 +157,52 @@ class ActividadInsumoService
         }
 
         $actividad->loadMissing('lote');
+        $lote = $actividad->lote;
+        if ($lote === null) {
+            throw ValidationException::withMessages([
+                'detalle_actividad_json' => 'La actividad no tiene lote para resolver el almacén de insumos.',
+            ]);
+        }
 
-        DB::transaction(function () use ($actividad, &$detalle) {
+        $almacen = CampoAccess::almacenAgricolaParaLote($lote);
+        $tipoSalida = $this->tipoMovimientoSalidaConsumoActividad();
+        $ejecutorId = (int) ($actividad->usuarioid_ejecutor ?: $actividad->usuarioid);
+
+        DB::transaction(function () use ($actividad, &$detalle, $almacen, $tipoSalida, $ejecutorId) {
             $estadoId = $this->idEstadoAplicado();
 
             foreach ($detalle['insumos'] as $fila) {
+                /** @var Insumo $insumo */
                 $insumo = Insumo::query()->lockForUpdate()->findOrFail((int) $fila['insumoid']);
-                $cantidad = (float) $fila['cantidad'];
+                $this->assertInsumoDeAlmacenOperativo($insumo, $almacen);
 
-                if ($insumo->stock < $cantidad) {
+                $cantidad = (float) $fila['cantidad'];
+                if ($cantidad <= 0) {
+                    continue;
+                }
+
+                if ((float) $insumo->stock < $cantidad) {
                     throw ValidationException::withMessages([
-                        'detalle_actividad_json' => 'Stock insuficiente de «'.$insumo->nombre.'». Disponible: '
+                        'detalle_actividad_json' => 'Stock insuficiente de «'.$insumo->nombre.'» en el almacén «'.$almacen->nombre.'». Disponible: '
                             .number_format((float) $insumo->stock, 2).' '.($fila['unidad'] ?? ''),
                     ]);
                 }
 
                 $insumo->decrementarStock($cantidad);
+
+                AlmacenMovimiento::create([
+                    'almacenid' => (int) $almacen->almacenid,
+                    'insumoid' => (int) $insumo->insumoid,
+                    'tipo_movimiento_almacenid' => (int) $tipoSalida->tipo_movimiento_almacenid,
+                    'usuarioid' => $ejecutorId,
+                    'fecha' => now()->toDateString(),
+                    'cantidad' => $cantidad,
+                    'referencia' => 'ACT-'.$actividad->actividadid,
+                    'destino_motivo' => 'Lote #'.$actividad->loteid,
+                    'observaciones' => '[Consumo actividad #'.$actividad->actividadid
+                        .'] lote #'.$actividad->loteid
+                        .' · '.$insumo->nombre,
+                ]);
 
                 LoteInsumo::create([
                     'loteid' => $actividad->loteid,
@@ -169,6 +218,7 @@ class ActividadInsumoService
             }
 
             $detalle['stock_aplicado'] = true;
+            $detalle['almacenid'] = (int) $almacen->almacenid;
             $actividad->detalle_json = json_encode($detalle, JSON_UNESCAPED_UNICODE);
             $actividad->save();
         });
@@ -196,6 +246,20 @@ class ActividadInsumoService
         )->whereIn('tipoinsumoid', $tipoIds)
             ->where('stock', '>', 0)
             ->orderBy('nombre');
+
+        // AGR-04: solo existencias del almacén agrícola operativo del jefe del lote.
+        // Legacy (almacenid null) excluido del selector operativo.
+        if ($lote !== null && Schema::hasColumn('insumo', 'almacenid')) {
+            try {
+                $almacen = CampoAccess::almacenAgricolaParaLote($lote);
+            } catch (ValidationException) {
+                // Sin almacén inequívoco no ofrecemos catálogo global ni legacy.
+                return [];
+            }
+            $query->where('almacenid', (int) $almacen->almacenid);
+        } elseif (Schema::hasColumn('insumo', 'almacenid')) {
+            $query->whereNotNull('almacenid');
+        }
 
         $referenciaNombre = null;
         $insumoPlanificadoId = null;
@@ -246,6 +310,7 @@ class ActividadInsumoService
             'id' => (int) $i->insumoid,
             'nombre' => $i->nombre,
             'stock' => (float) $i->stock,
+            'almacenid' => $i->almacenid ? (int) $i->almacenid : null,
             'unidad' => $i->unidadMedida?->abreviatura ?? $i->unidadMedida?->nombre ?? 'ud',
             'unidad_nombre' => $i->unidadMedida?->nombre ?? 'Unidad',
             'imagen' => InsumoImagenCatalogo::urlPara($i),
@@ -258,6 +323,52 @@ class ActividadInsumoService
         }
 
         return $data;
+    }
+
+    private function assertInsumoDeAlmacenOperativo(Insumo $insumo, Almacen $almacen): void
+    {
+        if (! Schema::hasColumn('insumo', 'almacenid')) {
+            return;
+        }
+
+        if ($insumo->almacenid === null) {
+            throw ValidationException::withMessages([
+                'detalle_actividad_json' => 'El insumo «'.$insumo->nombre.'» es legacy (sin almacén) y no puede usarse para consumo agrícola operativo.',
+            ]);
+        }
+
+        if ((int) $insumo->almacenid !== (int) $almacen->almacenid) {
+            throw ValidationException::withMessages([
+                'detalle_actividad_json' => 'El insumo «'.$insumo->nombre.'» no pertenece al almacén agrícola «'.$almacen->nombre.'».',
+            ]);
+        }
+    }
+
+    private function tipoMovimientoSalidaConsumoActividad(): TipoMovimientoAlmacen
+    {
+        $tipo = TipoMovimientoAlmacen::query()
+            ->where('naturaleza', 'salida')
+            ->where('activo', true)
+            ->get()
+            ->first(fn (TipoMovimientoAlmacen $t) => in_array(
+                TipoMovimientoAlmacen::normalizeNombre($t->nombre),
+                ['consumo actividad', 'consumo interno', 'aplicacion campo', 'aplicación campo', 'salida'],
+                true
+            ));
+
+        if ($tipo) {
+            return $tipo;
+        }
+
+        $fallback = TipoMovimientoAlmacen::activosPorNaturaleza('salida')->first();
+        if ($fallback) {
+            return $fallback;
+        }
+
+        return TipoMovimientoAlmacen::query()->firstOrCreate(
+            ['nombre' => 'Consumo actividad', 'naturaleza' => 'salida'],
+            ['activo' => true]
+        );
     }
 
     private function idEstadoAplicado(): int

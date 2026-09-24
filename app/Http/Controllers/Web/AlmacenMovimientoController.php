@@ -14,6 +14,7 @@ use App\Services\DestinosMotivoAlmacenService;
 use App\Services\ReferenciasAlmacenDisponiblesService;
 use App\Support\AlmacenAmbito;
 use App\Support\AlmacenPlantaCosechaCatalogo;
+use App\Support\CampoAccess;
 use App\Support\CampoJefeScope;
 use App\Support\UsuarioRol;
 use Carbon\Carbon;
@@ -430,14 +431,21 @@ class AlmacenMovimientoController extends Controller
     {
         InsumoCatalogo::asegurarCatalogosBase();
 
-        $almacenes = AlmacenAmbito::scope(Almacen::query(), $ctx['ambito'])
-            ->where('activo', true)
-            ->orderBy('nombre')
-            ->get();
+        $almacenes = CampoAccess::scopeAlmacenesAgricolas(
+            AlmacenAmbito::scope(Almacen::query(), $ctx['ambito'])->where('activo', true),
+            $request->user()
+        )->orderBy('nombre')->get();
+
+        $almacenIds = $almacenes->pluck('almacenid')->map(fn ($id) => (int) $id)->all();
 
         $insumosList = Insumo::query()
             ->with(['tipo', 'unidadMedida'])
             ->whereIn('tipoinsumoid', InsumoCatalogo::tiposValidosIds())
+            ->when(
+                Schema::hasColumn('insumo', 'almacenid') && $almacenIds !== [],
+                fn ($q) => $q->whereIn('almacenid', $almacenIds),
+                fn ($q) => Schema::hasColumn('insumo', 'almacenid') ? $q->whereRaw('1 = 0') : $q
+            )
             ->orderBy('nombre')
             ->get();
 

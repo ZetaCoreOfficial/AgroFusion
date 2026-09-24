@@ -500,7 +500,7 @@ class ActividadController extends Controller
         $detalleRaw = $this->actividadInsumos->parseDetalleDesdeRequest($request, $tipo->nombre ?? null);
         $detalle = [];
         if (ActividadDetalleCatalogo::requiereInsumos($tipo->nombre) || ActividadDetalleCatalogo::esRiego($tipo->nombre)) {
-            $detalle = $this->actividadInsumos->validarDetalle($detalleRaw, $tipo->nombre ?? null);
+            $detalle = $this->actividadInsumos->validarDetalle($detalleRaw, $tipo->nombre ?? null, $lote);
         }
 
         $resumenDetalle = ActividadDetalleCatalogo::textoResumenDesdeDetalle($tipo->nombre ?? null, $detalle);
