@@ -19,7 +19,7 @@ WORKDIR /app
 COPY . .
 
 # Fail the build if the photographs referenced by the catalog were omitted.
-RUN php -r '$m=json_decode(file_get_contents("public/images/insumos/catalogo-20260922.json"),true,512,JSON_THROW_ON_ERROR); foreach($m["images"] as $i) { $p="public".$i["path"]; if(!is_file($p)||hash_file("sha256",$p)!==$i["sha256"]) { fwrite(STDERR,"Missing or altered catalog image: ".$p.PHP_EOL); exit(1); } }'
+RUN php -r 'foreach(["public/images/insumos/catalogo-20260922.json","public/images/maquinas/catalogo.json"] as $f) { $m=json_decode(file_get_contents($f),true,512,JSON_THROW_ON_ERROR); foreach($m["images"] as $i) { $p="public".$i["path"]; if(!is_file($p)||hash_file("sha256",$p)!==$i["sha256"]) { fwrite(STDERR,"Missing or altered catalog image: ".$p.PHP_EOL); exit(1); } } }'
 
 
 RUN mkdir -p \

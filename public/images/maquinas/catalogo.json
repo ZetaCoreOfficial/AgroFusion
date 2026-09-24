@@ -1,0 +1,81 @@
+{
+  "images": [
+    {
+      "code": "L-100",
+      "path": "/images/maquinas/L-100.jpg",
+      "sha256": "0d554c64d399d44b4e9e80e5decb44e91445692ed43454c31c983e0733465dac",
+      "page": "https://foodtechprocess.com/en/washers-and-cip/480-rotary-drum-washer-drum-wash.html",
+      "og": "https://foodtechprocess.com/5085-large_default/rotary-drum-washer-drum-wash.jpg"
+    },
+    {
+      "code": "BC-20",
+      "path": "/images/maquinas/BC-20.png",
+      "sha256": "0f8e99abbea29d2ddc302068c773320f75e47dcd5a2b651bca4151f3364fe76e",
+      "page": "https://foodtechprocess.com/en/conveyors/252-sorting-transporting-belt-conveyor-mgsb.html",
+      "og": "https://foodtechprocess.com/3043-large_default/sorting-transporting-belt-conveyor-mgsb.jpg"
+    },
+    {
+      "code": "SE-10",
+      "path": "/images/maquinas/SE-10.jpg",
+      "sha256": "3bf0067bf3bc167c7b906d435f691654e35e843c79ce646d354632e4e72835e4",
+      "page": "https://www.zonesuntech.com/products/semi-automatic-horizontal-plastic-pouch-poly-pe-aluminium-foil-bags-continuous-band-sealer-sealing-machine",
+      "og": "https://www.zonesuntech.com/cdn/shop/products/P1_ce39abf3-b2c0-471d-a66d-ea2b1c795fa3.jpg?v=1643089612"
+    },
+    {
+      "code": "BD-500",
+      "path": "/images/maquinas/BD-500.jpg",
+      "sha256": "66e3b885eaf6a0267fa552b8fc17bdfa53fd2ae6c5ed65862c1c4c74839911cc",
+      "page": "https://www.zonesuntech.com/products/automatic-6-heads-checkweigher-sorting-machine-for-production-line",
+      "og": "https://www.zonesuntech.com/cdn/shop/files/ZS-MD210-6-checkweigher-sorting-machine.jpg?v=1767334756"
+    },
+    {
+      "code": "MX-200",
+      "path": "/images/maquinas/MX-200.jpg",
+      "sha256": "516507b66ee6e3d56a9272bc66a71e8e97ac43d4b75572b6ae615051443513b6",
+      "page": "https://foodtechprocess.com/en/mixers/557-ribbon-mixer-msh-500.html",
+      "og": "https://foodtechprocess.com/4581-large_default/ribbon-mixer-msh-500.jpg"
+    },
+    {
+      "code": "EX-300",
+      "path": "/images/maquinas/EX-300.jpg",
+      "sha256": "5d18bc545bfcb17cb3518b1ff01de2318001a78f28d3a16df8cf09346540e2de",
+      "page": "https://foodtechprocess.com/en/extruders/457-twin-screw-extruder-sbe-50.html",
+      "og": "https://foodtechprocess.com/5540-large_default/twin-screw-extruder-sbe-50.jpg"
+    },
+    {
+      "code": "MD-400",
+      "path": "/images/maquinas/MD-400.jpg",
+      "sha256": "c07180afaae269da428991326177945e5364eb1aa01f9a4645f402df619da195",
+      "page": "https://foodtechprocess.com/en/cutters/194-industrial-cutter-mixer-150l.html",
+      "og": "https://foodtechprocess.com/5074-large_default/industrial-cutter-mixer-150l.jpg"
+    },
+    {
+      "code": "SC-500",
+      "path": "/images/maquinas/SC-500.png",
+      "sha256": "ff7dcb7952a1f8438a840f8f583a4cd3a5b3f4f23df932ffaf78fa46765836e1",
+      "page": "https://foodtechprocess.com/en/dryers/355-multi-belt-dryer-and-cooler-dr.html",
+      "og": "https://foodtechprocess.com/1037-large_default/multi-belt-dryer-and-cooler-dr.jpg"
+    },
+    {
+      "code": "TR-600",
+      "path": "/images/maquinas/TR-600.jpg",
+      "sha256": "0c85f1e4bba6739a9b586e37761133b1cec6957aa6f2f57f82d55f314a3f6d42",
+      "page": "https://foodtechprocess.com/en/fryers/822-continuous-conveyor-fryer-400110012.html",
+      "og": "https://foodtechprocess.com/4445-large_default/continuous-conveyor-fryer-400110012.jpg"
+    },
+    {
+      "code": "EV-700",
+      "path": "/images/maquinas/EV-700.jpg",
+      "sha256": "235d8c6b8c5ff78e39b09c16e3fc814a7549d455704011e0072df05fe60a06d5",
+      "page": "https://www.zonesunmall.com/products/zonesun-zs-dz500k-semi-automatic-tilt-double-chamber-vacuum-packaging-machine-vacuum-packaging-machine-for-food-liquid-and-powder",
+      "og": "https://www.zonesunmall.com/cdn/shop/files/8001_5a765801-c2b3-467a-bcc3-29eac2776b56.jpg?v=1750996384"
+    },
+    {
+      "code": "ET-800",
+      "path": "/images/maquinas/ET-800.jpg",
+      "sha256": "9f62cd3818d6ac247d215a4fc1b88c5339e4efd1dbfaa96e8fba77517ccd1369",
+      "page": "https://www.zonesuntech.com/products/automatic-round-bottle-single-double-side-labelling-machine",
+      "og": "https://www.zonesuntech.com/cdn/shop/products/AutomaticRoundBottleLabelingMachine_1.jpg?v=1620811572"
+    }
+  ]
+}

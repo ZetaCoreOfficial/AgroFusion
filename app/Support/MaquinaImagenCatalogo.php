@@ -13,19 +13,19 @@ final class MaquinaImagenCatalogo
      */
     public static function urlsPorCodigo(): array
     {
-        // Special:FilePath redirige al archivo real en Commons (más estable que thumbs hardcodeados).
+        // Fotografías industriales incluidas y verificadas en cada despliegue.
         return [
-            'L-100' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Washing_vegetables.jpg?width=640',
-            'BC-20' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Packages_on_UPS_conveyor_belt.jpg?width=640',
-            'SE-10' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Continuous_Band_Sealer_Machine.jpg?width=640',
-            'BD-500' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Analytical_balance_mettler_ae-260.jpg?width=640',
-            'MX-200' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Industrial_planetary_mixer.jpg?width=640',
-            'EX-300' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Pasta_machine.jpg?width=640',
-            'MD-400' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Old-fashioned_cookie_cutters_61.jpg?width=640',
-            'SC-500' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Food_dehydrator.jpg?width=640',
-            'TR-600' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Pizza_in_deep_fat_fryer_2.jpg?width=640',
-            'EV-700' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Krostitzer_Brauerei_-_Abfuellung.jpg?width=640',
-            'ET-800' => 'https://commons.wikimedia.org/wiki/Special:FilePath/Label_dispenser.jpg?width=640',
+            'L-100' => asset('images/maquinas/L-100.jpg'),
+            'BC-20' => asset('images/maquinas/BC-20.png'),
+            'SE-10' => asset('images/maquinas/SE-10.jpg'),
+            'BD-500' => asset('images/maquinas/BD-500.jpg'),
+            'MX-200' => asset('images/maquinas/MX-200.jpg'),
+            'EX-300' => asset('images/maquinas/EX-300.jpg'),
+            'MD-400' => asset('images/maquinas/MD-400.jpg'),
+            'SC-500' => asset('images/maquinas/SC-500.png'),
+            'TR-600' => asset('images/maquinas/TR-600.jpg'),
+            'EV-700' => asset('images/maquinas/EV-700.jpg'),
+            'ET-800' => asset('images/maquinas/ET-800.jpg'),
         ];
     }
 

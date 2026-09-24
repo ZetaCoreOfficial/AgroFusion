@@ -14,6 +14,9 @@ final class InsumoImagenCatalogo
      * @var array<string, string>
      */
     private const LOCAL_POR_NOMBRE = [
+        'chirimoya' => 'images/insumos/catalogo-20260922/insumo-148.jpg',
+        'zanahoria imperator envasada' => 'images/insumos/catalogo-20260922/insumo-147.jpg',
+        'papa huaycha lavada' => 'images/insumos/catalogo-20260922/insumo-146.jpg',
         'semilla de chirimoya' => 'images/insumos/catalogo-20260922/insumo-145.jpg',
         'papa huaycha' => 'images/insumos/catalogo-20260922/insumo-140.jpg',
         'papa rubíola granel' => 'images/insumos/catalogo-20260922/insumo-121.jpg',
