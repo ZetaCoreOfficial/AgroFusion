@@ -161,7 +161,7 @@ class AsignacionEtapaPlantaService
             throw new \InvalidArgumentException('Esta etapa no admite cierre de fase en el estado actual.');
         }
 
-        $this->validarFilaPlanEtapa($paso, $etapa);
+        $this->validarFilaPlanEtapa($paso, $etapa, $asignador);
 
         DB::transaction(function () use ($lote, $paso, $etapa, $asignador) {
             $this->crearAsignacionDesdeFilaPlan($lote, $paso, $etapa, $asignador);
@@ -195,7 +195,7 @@ class AsignacionEtapaPlantaService
                 throw new \InvalidArgumentException('Falta la asignación para la etapa '.$paso->orden.'.');
             }
 
-            $this->validarFilaPlanEtapa($paso, $fila);
+            $this->validarFilaPlanEtapa($paso, $fila, $asignador);
         }
 
         DB::transaction(function () use ($lote, $pasosSinAsignar, $porPasoId, $asignador) {
@@ -244,14 +244,16 @@ class AsignacionEtapaPlantaService
     /**
      * @param  array{loteproduccionrutapasoid: int, operador_usuarioid: int, variables?: list<array{variableestandarid: int, valor_minimo: float|int, valor_maximo: float|int}>}  $fila
      */
-    private function validarFilaPlanEtapa(LoteProduccionRutaPaso $paso, array $fila): void
+    private function validarFilaPlanEtapa(LoteProduccionRutaPaso $paso, array $fila, Usuario $asignador): void
     {
-        $operador = UsuarioRol::queryOperariosPlanta()
+        $operador = PlantaAccess::queryOperariosAsignables($asignador)
             ->where('usuarioid', (int) $fila['operador_usuarioid'])
             ->first();
 
         if (! $operador || ! UsuarioRol::esOperarioPlanta($operador)) {
-            throw new \InvalidArgumentException('Etapa '.$paso->orden.': el operario debe tener rol planta.');
+            throw new \InvalidArgumentException(
+                'Etapa '.$paso->orden.': el operario debe tener rol planta y pertenecer a su equipo.'
+            );
         }
 
         if (in_array($paso->proceso?->nombre, ['Control de Calidad'], true)) {

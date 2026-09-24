@@ -77,19 +77,13 @@ final class ActividadPermisos
             return false;
         }
 
-        if (UsuarioRol::gestionaCampo($user)) {
-            $actividad->loadMissing('lote');
+        // AGR-05: el jefe supervisa; no ejecuta/completa tareas del operario.
+        if (UsuarioRol::esAdminGlobal($user)) {
+            return true;
+        }
 
-            if (UsuarioRol::esAdminGlobal($user)) {
-                return true;
-            }
-
-            return $actividad->lote
-                && in_array(
-                    (int) $actividad->lote->usuarioid,
-                    UsuarioRol::idsUsuariosBajoJefeAgricultor($user),
-                    true
-                );
+        if (UsuarioRol::esJefeAgricultor($user)) {
+            return false;
         }
 
         if (UsuarioRol::debeAcotarPorAsignacion($user)) {

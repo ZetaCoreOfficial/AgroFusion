@@ -506,9 +506,9 @@ class LoteProduccionController extends Controller
         $user = $request->user();
         $esOperador = UsuarioRol::esOperarioPlanta($user)
             && (int) $asignacion->operador_usuarioid === (int) $user->usuarioid;
-        $esSupervisor = UsuarioRol::gestionaPlanta($user) || $user?->hasRole('admin');
 
-        abort_unless($esOperador || $esSupervisor, 403);
+        // JPL-03: el jefe define/asigna/supervisa; no completa etapas del operario.
+        abort_unless($esOperador || UsuarioRol::esAdminGlobal($user), 403);
 
         if ((int) $asignacion->loteproduccionpedidoid !== (int) $loteProduccion->loteproduccionpedidoid) {
             abort(404);
@@ -529,13 +529,7 @@ class LoteProduccionController extends Controller
                 'parametros' => array_values($data['parametros'] ?? []),
             ];
 
-            $registro = $esOperador
-                ? $this->asignacionEtapa->completar($asignacion, $payload, $user)
-                : $this->asignacionEtapa->completarPorSupervisor(
-                    $asignacion,
-                    $user,
-                    $payload['parametros'],
-                );
+            $registro = $this->asignacionEtapa->completar($asignacion, $payload, $user);
         } catch (\InvalidArgumentException $e) {
             if ($respondeJson) {
                 return response()->json(['ok' => false, 'message' => $e->getMessage()], 422);
@@ -755,7 +749,7 @@ class LoteProduccionController extends Controller
 
     public function almacenar(Request $request, LoteProduccionPedido $loteProduccion): RedirectResponse
     {
-        abort_unless(UsuarioRol::esPlantaOperativo($request->user()) || $request->user()?->hasRole('admin'), 403);
+        abort_unless(UsuarioRol::gestionaPlanta($request->user()) || UsuarioRol::esAdminGlobal($request->user()), 403);
 
         if (! $this->trazabilidad->evaluacionAprobada($loteProduccion)) {
             if ($this->trazabilidad->loteRechazado($loteProduccion)) {
@@ -849,7 +843,7 @@ class LoteProduccionController extends Controller
 
     public function completar(LoteProduccionPedido $loteProduccion): RedirectResponse
     {
-        abort_unless(UsuarioRol::esPlantaOperativo(auth()->user()) || auth()->user()?->hasRole('admin'), 403);
+        abort_unless(UsuarioRol::gestionaPlanta(auth()->user()) || UsuarioRol::esAdminGlobal(auth()->user()), 403);
 
         if (! $loteProduccion->almacenajes()->exists()) {
             return back()->with('error', 'Registre el almacenaje antes de cerrar el lote.');
@@ -1260,7 +1254,7 @@ class LoteProduccionController extends Controller
             'sortable' => $panelActivo === 'transformacion' && $puedeAsignarPlanEtapas,
             'modoPlan' => $puedeAsignarPlanEtapas,
             'puedeGestionarPlan' => $puedeAsignarEtapa && ! $transformacionCompleta,
-            'puedeMarcarCompletada' => $puedeAsignarEtapa && ! $transformacionCompleta,
+            'puedeMarcarCompletada' => false,
             'usuarioActualId' => (int) ($user?->usuarioid ?? 0),
             'esOperarioPlanta' => UsuarioRol::esOperarioPlanta($user),
             'lote' => $lote,

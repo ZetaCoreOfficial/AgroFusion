@@ -15,6 +15,7 @@ use App\Services\ReferenciasAlmacenDisponiblesService;
 use App\Support\AlmacenAmbito;
 use App\Support\AlmacenPlantaCosechaCatalogo;
 use App\Support\CampoJefeScope;
+use App\Support\UsuarioRol;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -335,6 +336,14 @@ class AlmacenMovimientoController extends Controller
         abort_unless(in_array($naturaleza, ['ingreso', 'salida'], true), 404);
         $permisoCrear = $naturaleza === 'ingreso' ? 'almacen.ingresos.create' : 'almacen.salidas.create';
         abort_unless($request->user()?->can($permisoCrear), 403);
+
+        $user = $request->user();
+        if (UsuarioRol::esOperarioPlanta($user) && ! UsuarioRol::esAdminGlobal($user)) {
+            abort(403, 'El operario de planta no registra movimientos generales de almacén.');
+        }
+        if (UsuarioRol::debeAcotarPorAsignacion($user)) {
+            abort(403, 'El operario agricultor no administra movimientos de almacén.');
+        }
 
         $ctx = AlmacenAmbito::contexto($request);
 

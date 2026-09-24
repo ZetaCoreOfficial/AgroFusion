@@ -178,10 +178,9 @@ class LoteSiembraService
             }
 
             $esAsignado = (int) $pendiente->usuarioid === (int) $usuario->usuarioid;
-            $puedeSustituir = UsuarioRol::gestionaCampo($usuario);
-            if (! $esAsignado && ! $puedeSustituir) {
+            if (! $esAsignado && ! UsuarioRol::esAdminGlobal($usuario)) {
                 throw ValidationException::withMessages([
-                    'siembra' => 'La siembra está asignada a otro agricultor.',
+                    'siembra' => 'La siembra está asignada a otro agricultor. El jefe solo supervisa; no la completa.',
                 ]);
             }
         }

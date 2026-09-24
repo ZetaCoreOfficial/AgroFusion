@@ -581,6 +581,12 @@ class PedidoController extends Controller
 
     public function confirmarLlegadaPlanta(Pedido $pedido, RecepcionPlantaEnvioService $recepcionService): RedirectResponse
     {
+        abort_unless(
+            \App\Support\UsuarioRol::puedeConfirmarRecepcionPlanta(auth()->user()),
+            403,
+            'Solo el jefe de planta puede confirmar la recepción.'
+        );
+
         try {
             $recepcionService->confirmarDesdePedido($pedido, auth()->user());
         } catch (\InvalidArgumentException $e) {

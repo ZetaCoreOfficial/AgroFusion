@@ -39,6 +39,12 @@ class ActividadController extends Controller
 
     public function store(Request $request)
     {
+        abort_unless(
+            UsuarioRol::gestionaCampo($request->user()) || UsuarioRol::esAdminGlobal($request->user()),
+            403,
+            'Solo el jefe agrícola puede crear o asignar actividades.'
+        );
+
         $data = $request->validate([
             'loteid' => 'required|exists:lote,loteid',
             'usuarioid' => 'nullable|exists:usuario,usuarioid',
@@ -60,11 +66,7 @@ class ActividadController extends Controller
 
         abort_unless($permitido, 403, 'No tienes acceso a este lote.');
 
-        if (UsuarioRol::debeAcotarPorAsignacion($user)) {
-            $data['usuarioid'] = (int) $user->usuarioid;
-        } else {
-            $data['usuarioid'] = (int) ($data['usuarioid'] ?? $user->usuarioid);
-        }
+        $data['usuarioid'] = (int) ($data['usuarioid'] ?? $user->usuarioid);
 
         $actividad = Actividad::create($data);
 

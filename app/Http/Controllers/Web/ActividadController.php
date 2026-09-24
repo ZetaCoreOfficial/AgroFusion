@@ -130,6 +130,12 @@ class ActividadController extends Controller
 
     public function create(Request $request)
     {
+        abort_unless(
+            UsuarioRol::gestionaCampo($request->user()) || $request->user()?->hasRole('admin'),
+            403,
+            'Solo el jefe agrícola puede crear o asignar actividades.'
+        );
+
         if ($request->filled('loteid') && $request->filled('tipo')
             && str_contains(mb_strtolower(trim((string) $request->tipo)), 'siembra')) {
             $params = ['lote' => $request->integer('loteid')];
@@ -463,6 +469,12 @@ class ActividadController extends Controller
 
     public function store(Request $request)
     {
+        abort_unless(
+            UsuarioRol::gestionaCampo($request->user()) || $request->user()?->hasRole('admin'),
+            403,
+            'Solo el jefe agrícola puede crear o asignar actividades.'
+        );
+
         $data = $request->validate([
             'loteid' => 'required|exists:lote,loteid',
             'descripcion' => 'nullable|string|max:200',
