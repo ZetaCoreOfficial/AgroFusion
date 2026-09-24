@@ -430,21 +430,11 @@ return [
 
             'recepcion_planta.view',
 
-            'recepcion_planta.confirm',
-
             'lote_produccion.view',
 
             'inventario.view',
 
-            'inventario.create',
-
-            'inventario.update',
-
             'almacen.movimientos.view',
-
-            'almacen.ingresos.create',
-
-            'almacen.salidas.create',
 
             'almacen.reportes.view',
 
