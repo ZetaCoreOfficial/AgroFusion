@@ -119,8 +119,17 @@ Route::name('api.')->group(function () {
         ->middleware(['auth:sanctum', 'action.permission:inventario,delete']);
     Route::apiResource('lote-insumos', LoteInsumoController::class);
 
-    // ACTIVIDADES
-    Route::apiResource('actividades', ActividadController::class);
+    // ACTIVIDADES (misma matriz que web: lotes,read / lotes,update)
+    Route::get('actividades', [ActividadController::class, 'index'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,read']);
+    Route::post('actividades', [ActividadController::class, 'store'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,read']);
+    Route::get('actividades/{actividad}', [ActividadController::class, 'show'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,read']);
+    Route::match(['put', 'patch'], 'actividades/{actividad}', [ActividadController::class, 'update'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,update']);
+    Route::delete('actividades/{actividad}', [ActividadController::class, 'destroy'])
+        ->middleware(['auth:sanctum', 'action.permission:lotes,update']);
 
     // CLIMA
     Route::apiResource('climas', ClimaController::class);

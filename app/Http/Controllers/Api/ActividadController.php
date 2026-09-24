@@ -4,21 +4,36 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Actividad;
+use App\Models\Lote;
+use App\Support\ActividadPermisos;
+use App\Support\LoteAcceso;
+use App\Support\UsuarioRol;
 use Illuminate\Http\Request;
 
 class ActividadController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Actividad::with(['lote', 'usuario', 'tipoActividad', 'prioridad'])->get()
-        );
+        $query = Actividad::query()->with(['lote', 'usuario', 'tipoActividad', 'prioridad']);
+        ActividadPermisos::aplicarScopeVisibles($query, $request->user());
+
+        return response()->json($query->get());
     }
 
-    public function show($id)
+    public function show(Request $request, $actividad)
     {
+        $actividad = $actividad instanceof Actividad
+            ? $actividad
+            : Actividad::query()->findOrFail($actividad);
+
+        abort_unless(
+            ActividadPermisos::puedeAcceder($request->user(), $actividad),
+            403,
+            'No tienes acceso a esta actividad.'
+        );
+
         return response()->json(
-            Actividad::with(['lote', 'usuario', 'tipoActividad', 'prioridad'])->findOrFail($id)
+            $actividad->load(['lote', 'usuario', 'tipoActividad', 'prioridad'])
         );
     }
 
@@ -26,7 +41,7 @@ class ActividadController extends Controller
     {
         $data = $request->validate([
             'loteid' => 'required|exists:lote,loteid',
-            'usuarioid' => 'required|exists:usuario,usuarioid',
+            'usuarioid' => 'nullable|exists:usuario,usuarioid',
             'descripcion' => 'required|string|max:200',
             'fechainicio' => 'nullable|date',
             'fechafin' => 'nullable|date',
@@ -35,14 +50,38 @@ class ActividadController extends Controller
             'observaciones' => 'nullable|string|max:250',
         ]);
 
+        $user = $request->user();
+        $lote = Lote::query()->findOrFail((int) $data['loteid']);
+
+        $permitido = Lote::query()
+            ->where('loteid', $lote->loteid)
+            ->tap(fn ($q) => LoteAcceso::aplicarScopeOperativoActividad($q, $user))
+            ->exists();
+
+        abort_unless($permitido, 403, 'No tienes acceso a este lote.');
+
+        if (UsuarioRol::debeAcotarPorAsignacion($user)) {
+            $data['usuarioid'] = (int) $user->usuarioid;
+        } else {
+            $data['usuarioid'] = (int) ($data['usuarioid'] ?? $user->usuarioid);
+        }
+
         $actividad = Actividad::create($data);
 
         return response()->json($actividad, 201);
     }
 
-    public function update(Request $request, $id)
+    public function update(Request $request, $actividad)
     {
-        $actividad = Actividad::findOrFail($id);
+        $actividad = $actividad instanceof Actividad
+            ? $actividad
+            : Actividad::query()->findOrFail($actividad);
+
+        abort_unless(
+            ActividadPermisos::puedeAcceder($request->user(), $actividad),
+            403,
+            'No tienes acceso a esta actividad.'
+        );
 
         $data = $request->validate([
             'loteid' => 'sometimes|exists:lote,loteid',
@@ -55,14 +94,42 @@ class ActividadController extends Controller
             'observaciones' => 'nullable|string|max:250',
         ]);
 
+        $user = $request->user();
+
+        if (isset($data['loteid'])) {
+            $lote = Lote::query()->findOrFail((int) $data['loteid']);
+            $permitido = Lote::query()
+                ->where('loteid', $lote->loteid)
+                ->tap(fn ($q) => LoteAcceso::aplicarScopeOperativoActividad($q, $user))
+                ->exists();
+            abort_unless($permitido, 403, 'No tienes acceso a este lote.');
+        }
+
+        if (UsuarioRol::debeAcotarPorAsignacion($user)) {
+            unset($data['usuarioid']);
+        }
+
         $actividad->update($data);
 
         return response()->json($actividad);
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $actividad)
     {
-        $actividad = Actividad::findOrFail($id);
+        $actividad = $actividad instanceof Actividad
+            ? $actividad
+            : Actividad::query()->findOrFail($actividad);
+
+        $actividad->loadMissing('lote');
+
+        abort_unless(
+            ActividadPermisos::puedeAcceder($request->user(), $actividad)
+            && $actividad->lote
+            && LoteAcceso::puedeGestionar($request->user(), $actividad->lote),
+            403,
+            'No tienes permiso para eliminar esta actividad.'
+        );
+
         $actividad->delete();
 
         return response()->json(['message' => 'Eliminado correctamente']);

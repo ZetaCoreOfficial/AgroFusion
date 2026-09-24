@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Lote;
+use App\Support\LoteAcceso;
 use App\Support\LoteCultivoResolver;
 use App\Support\LoteDefaults;
 use App\Support\UbicacionGpsParser;
@@ -11,19 +12,23 @@ use Illuminate\Http\Request;
 
 class LoteController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $query = Lote::query()->with(['usuario', 'cultivo', 'estadoTipo', 'insumoSemilla']);
+        LoteAcceso::aplicarScopeVisibles($query, $request->user());
+
         return response()->json(
-            Lote::with(['usuario', 'cultivo', 'estadoTipo', 'insumoSemilla'])->get()
-                ->makeVisible(['usuario', 'cultivo', 'estadoTipo', 'insumoSemilla'])
+            $query->get()->makeVisible(['usuario', 'cultivo', 'estadoTipo', 'insumoSemilla'])
         );
     }
 
-    public function show($id)
+    public function show(Request $request, $lote)
     {
+        $lote = $lote instanceof Lote ? $lote : Lote::query()->findOrFail($lote);
+        abort_unless(LoteAcceso::puedeVer($request->user(), $lote), 403, 'No tienes acceso a este lote.');
+
         return response()->json(
-            Lote::with(['usuario', 'cultivo', 'estadoTipo', 'producciones', 'actividades', 'insumoSemilla'])
-                ->findOrFail($id)
+            $lote->load(['usuario', 'cultivo', 'estadoTipo', 'producciones', 'actividades', 'insumoSemilla'])
                 ->makeVisible(['usuario', 'cultivo', 'estadoTipo', 'insumoSemilla', 'producciones', 'actividades'])
         );
     }
@@ -76,9 +81,10 @@ class LoteController extends Controller
         );
     }
 
-    public function update(Request $request, $id)
+    public function update(Request $request, $lote)
     {
-        $lote = Lote::findOrFail($id);
+        $lote = $lote instanceof Lote ? $lote : Lote::query()->findOrFail($lote);
+        abort_unless(LoteAcceso::puedeGestionar($request->user(), $lote), 403, 'No tienes acceso a este lote.');
 
         $data = $request->validate([
             'usuarioid' => 'sometimes|exists:usuario,usuarioid',
@@ -104,9 +110,11 @@ class LoteController extends Controller
         );
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $lote)
     {
-        $lote = Lote::findOrFail($id);
+        $lote = $lote instanceof Lote ? $lote : Lote::query()->findOrFail($lote);
+        abort_unless(LoteAcceso::puedeGestionar($request->user(), $lote), 403, 'No tienes acceso a este lote.');
+
         $lote->delete();
 
         return response()->json(['message' => 'Eliminado correctamente']);
