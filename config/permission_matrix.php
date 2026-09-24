@@ -438,9 +438,7 @@ return [
 
             'almacen.reportes.view',
 
-            'pedidos_distribucion.view',
-
-            'pedidos_distribucion.update',
+            // OPP-09: pedidos_distribucion.* retirados del operario (flujo comercial = jefe/mayorista)
 
         ],
 

@@ -50,6 +50,8 @@ class PermissionMatrixAlineacionTest extends TestCase
         $this->assertTrue($op->can('panel_planta.view'));
         $this->assertTrue($op->can('lote_produccion.view'));
         $this->assertTrue($op->can('inventario.view'));
+        $this->assertFalse($op->can('pedidos_distribucion.view'));
+        $this->assertFalse($op->can('pedidos_distribucion.update'));
     }
 
     public function test_jefe_planta_conserva_recepcion_y_movimientos(): void
