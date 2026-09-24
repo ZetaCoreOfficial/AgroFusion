@@ -16,10 +16,12 @@ class FirmaRecepcionEnvio extends Model
         'imagenfirma',
         'nombrefirmante',
         'fechafirma',
+        'firmante_usuarioid',
     ];
 
     protected $casts = [
         'fechafirma' => 'datetime',
+        'firmante_usuarioid' => 'integer',
     ];
 
     public function ruta(): BelongsTo

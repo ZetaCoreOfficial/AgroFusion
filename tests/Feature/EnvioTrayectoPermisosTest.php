@@ -36,14 +36,13 @@ class EnvioTrayectoPermisosTest extends TestCase
         return $user;
     }
 
-    public function test_admin_puede_ver_los_tres_trayectos(): void
+    public function test_admin_supervisor_no_registra_envios_en_ningun_trayecto(): void
     {
         $admin = $this->createUser('admin');
 
-        $this->assertSame(
-            ['planta', 'mayorista', 'punto-venta'],
-            EnvioTrayectoCatalogo::trayectosPermitidos($admin)
-        );
+        $this->assertSame([], EnvioTrayectoCatalogo::trayectosPermitidos($admin));
+        $this->assertFalse(EnvioTrayectoCatalogo::puedeCrearAlguno($admin));
+        $this->actingAs($admin)->get(route('pedidos.create'))->assertForbidden();
     }
 
     public function test_jefe_agricultor_solo_trayecto_planta(): void

@@ -33,6 +33,20 @@
                 </div>
             </div>
 
+            @unless($esAdminPdv ?? false)
+            <div class="form-row mb-3">
+                <div class="form-group col-md-4 mb-0">
+                    <label class="small font-weight-bold" for="canal_origen_pdv">Canal del pedido <span class="text-danger">*</span></label>
+                    <select name="canal_origen" id="canal_origen_pdv" class="form-control form-control-sm" required>
+                        @foreach(\App\Support\PedidoDistribucionCatalogo::CANALES_EXTERNOS as $valorCanal => $etiquetaCanal)
+                            <option value="{{ $valorCanal }}" @selected(old('canal_origen', 'otro') === $valorCanal)>{{ $etiquetaCanal }}</option>
+                        @endforeach
+                    </select>
+                    <small class="text-muted">Por dónde le llegó el pedido. Queda registrado como pedido externo cargado por usted.</small>
+                </div>
+            </div>
+            @endunless
+
             <div class="alert alert-light border py-2 mb-3 small" id="pdv-paso-ayuda">
                 <strong>Paso a paso:</strong>
                 @if($esOrigenMayoristaPdv ?? $esAdminPdv ?? false)

@@ -12,6 +12,7 @@ use App\Services\RecepcionPlantaMayoristaService;
 use App\Support\EnvioCierreAgricolaCatalogo;
 use App\Support\MayoristaAccess;
 use App\Support\UsuarioRol;
+use App\Support\ViajeAcceso;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -219,10 +220,13 @@ class EnvioCierrePlantaMayoristaController extends Controller
 
         $validated = $request->validate([
             'imagen_firma' => ['required', 'string'],
+            'recepcion' => ['nullable', 'array'],
+            'recepcion.*.recibido' => ['nullable', 'numeric', 'min:0'],
+            'recepcion.*.motivo' => ['nullable', 'string', 'max:255'],
         ]);
 
         try {
-            $this->cierre->guardarFirmaRecepcion($ruta, $request->user(), $validated['imagen_firma']);
+            $this->cierre->guardarFirmaRecepcion($ruta, $request->user(), $validated['imagen_firma'], $validated['recepcion'] ?? []);
         } catch (\InvalidArgumentException $e) {
             return $this->respuestaError($e->getMessage());
         }
@@ -292,14 +296,8 @@ class EnvioCierrePlantaMayoristaController extends Controller
             abort(403);
         }
 
-        if (
-            UsuarioRol::esAdminGlobal($user)
-            || UsuarioRol::esJefePlanta($user)
-            || $user->can('asignaciones.view')
-            || $user->can('asignaciones.update')
-            || MayoristaAccess::puedeGestionarTraslado($user, $ruta)
-            || (int) $ruta->transportista_usuarioid === (int) $user->usuarioid
-        ) {
+        // Ownership (TRA-02): conductor asignado, mayorista destino, planta o supervisión del admin.
+        if (ViajeAcceso::puedeVerRutaDistribucion($user, $ruta)) {
             return;
         }
 

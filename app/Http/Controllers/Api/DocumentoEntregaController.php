@@ -20,10 +20,8 @@ class DocumentoEntregaController extends Controller
             ->tap(fn ($query) => DocumentoEntregaCatalogo::aplicarFiltroOperativo($query))
             ->orderByDesc('created_at');
 
-        $user = auth()->user();
-        if ($user && $user->hasRole('transportista')) {
-            DocumentoEntregaTransportista::restringirConsultaTransportista($q, $user->usuarioid);
-        }
+        // Misma regla que la web (TRA-13): conductor → sus viajes; mayorista → sus almacenes; etc.
+        \App\Support\DocumentoEntregaAcceso::aplicarFiltroRol($q, auth()->user());
 
         $documentos = $q->paginate(20);
 
@@ -77,13 +75,7 @@ class DocumentoEntregaController extends Controller
 
     public function download(DocumentoEntrega $documento): StreamedResponse
     {
-        $user = auth()->user();
-        if ($user && $user->hasRole('transportista')) {
-            abort_unless(
-                DocumentoEntregaTransportista::puedeVerDocumento($documento, $user->usuarioid),
-                403
-            );
-        }
+        abort_unless(\App\Support\DocumentoEntregaAcceso::puedeVerDocumento($documento, auth()->user()), 403);
         abort_unless(Storage::disk('public')->exists($documento->archivo_path), 404, 'Documento no encontrado.');
 
         return Storage::disk('public')->download(

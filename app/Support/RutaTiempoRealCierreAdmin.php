@@ -86,6 +86,7 @@ final class RutaTiempoRealCierreAdmin
 
     private static function esAdminOperativo(Usuario $user): bool
     {
-        return UsuarioRol::esAdminGlobal($user) || $user->can('asignaciones.update');
+        // Coordinador logístico; el admin supervisor ya no confirma llegadas en nombre del receptor.
+        return UsuarioRol::puedeOperar($user) && $user->can('asignaciones.update');
     }
 }

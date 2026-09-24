@@ -51,7 +51,7 @@ class DashboardController extends Controller
 {
     private function isAdmin($user): bool
     {
-        return (bool) ($user && ($user->hasRole('admin') || $user->hasRole('Admin')));
+        return UsuarioRol::esAdminGlobal($user);
     }
 
     public function index(Request $request, NotificacionUsuarioService $notificaciones)

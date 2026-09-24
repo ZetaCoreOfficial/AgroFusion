@@ -37,7 +37,8 @@ final class ActividadPermisos
 
     public static function puedeMarcarCompletada(?Usuario $user, Actividad $actividad): bool
     {
-        if (! $user || $actividad->fechafin !== null) {
+        // El admin supervisa actividades pero no las completa en nombre de otros.
+        if (! UsuarioRol::puedeOperar($user) || $actividad->fechafin !== null) {
             return false;
         }
 
@@ -48,10 +49,6 @@ final class ActividadPermisos
 
         if (UsuarioRol::gestionaCampo($user)) {
             $actividad->loadMissing('lote');
-
-            if (UsuarioRol::esAdminGlobal($user)) {
-                return true;
-            }
 
             return $actividad->lote
                 && in_array(

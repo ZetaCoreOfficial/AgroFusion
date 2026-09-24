@@ -81,7 +81,7 @@ class RecepcionQrFirmaTest extends TestCase
         $this->assertSame('Marco Polo', $firmaT->nombrefirmante);
     }
 
-    public function test_firma_publica_desde_qr_registra_nombre_y_firma(): void
+    public function test_firma_desde_qr_exige_la_cuenta_del_receptor_y_nunca_la_del_transportista(): void
     {
         $transportista = $this->transportista();
         $envio = EnvioAsignacionMultiple::create([
@@ -91,23 +91,50 @@ class RecepcionQrFirmaTest extends TestCase
             'fecha_asignacion' => now(),
             'llegada_confirmada_at' => now(),
         ]);
+        app(CierreEnvioAgricolaService::class)->registrarIncidentes($envio->fresh(), $transportista, true);
 
         FirmaTransportistaEnvio::create([
             'envioasignacionmultipleid' => $envio->envioasignacionmultipleid,
             'imagenfirma' => 'data:image/png;base64,iVBORw0KGgo=',
             'nombrefirmante' => 'Marco Polo',
+            'firmante_usuarioid' => $transportista->usuarioid,
             'fechafirma' => now(),
         ]);
 
         $qr = app(RecepcionQrFirmaService::class)->ensureToken($envio);
-        $firma = app(RecepcionQrFirmaService::class)->guardarFirmaRecepcionPublica(
-            $qr->token,
-            'Ana Recepción',
-            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-        );
+        $imagen = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
-        $this->assertSame('Ana Recepción', $firma->nombrefirmante);
-        $this->assertTrue($envio->fresh()->firmaRecepcion()->exists());
+        // Sin sesión: la pantalla pide iniciar sesión y el POST no firma (antes bastaba escribir un nombre).
+        $this->get(route('recepcion.publica', $qr->token))->assertOk()->assertSee('Iniciar sesión para firmar');
+        $this->post(route('recepcion.publica.firmar', $qr->token), [
+            'nombrefirmante' => 'Ana Recepción',
+            'imagen_firma' => $imagen,
+        ])->assertRedirect(route('login'));
+        $this->assertFalse($envio->fresh()->firmaRecepcion()->exists());
+
+        // El transportista, aunque tenga el QR en su pantalla, no firma la recepción (TRA-01).
+        $this->actingAs($transportista)
+            ->postJson(route('recepcion.publica.firmar', $qr->token), ['imagen_firma' => $imagen])
+            ->assertStatus(422);
+        $this->assertFalse($envio->fresh()->firmaRecepcion()->exists());
+
+        // Personal de planta (receptor real) firma con su cuenta.
+        Role::findOrCreate('planta', 'web');
+        $receptora = Usuario::create([
+            'nombre' => 'Ana', 'apellido' => 'Recepción', 'email' => 'ana.recepcion.qr@test.local',
+            'nombreusuario' => 'ana_recepcion_qr', 'passwordhash' => Hash::make('secret'),
+            'role' => 'planta', 'fecharegistro' => now(), 'activo' => true,
+        ]);
+        $receptora->assignRole('planta');
+
+        $this->actingAs($receptora)
+            ->postJson(route('recepcion.publica.firmar', $qr->token), ['imagen_firma' => $imagen])
+            ->assertOk();
+
+        $firma = $envio->fresh()->firmaRecepcion;
+        $this->assertNotNull($firma);
+        $this->assertSame((int) $receptora->usuarioid, (int) $firma->firmante_usuarioid);
+        $this->assertStringContainsString('Ana', (string) $firma->nombrefirmante);
     }
 
     public function test_pagina_publica_qr_responde_sin_login(): void

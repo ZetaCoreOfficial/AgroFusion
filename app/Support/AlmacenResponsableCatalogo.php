@@ -73,8 +73,8 @@ final class AlmacenResponsableCatalogo
                 $q->whereIn('role', $roles)
                     ->orWhereHas('roles', fn ($r) => $r->whereIn('name', $roles));
             })
-            ->whereNotIn('role', ['admin', 'Admin'])
-            ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'admin'))
+            ->whereNotIn('role', UsuarioRol::nombresRolAdmin())
+            ->whereDoesntHave('roles', fn ($r) => $r->whereIn('name', UsuarioRol::nombresRolAdmin()))
             ->orderBy('nombre')
             ->orderBy('apellido')
             ->get();

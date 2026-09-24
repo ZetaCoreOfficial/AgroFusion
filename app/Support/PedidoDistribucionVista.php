@@ -23,7 +23,7 @@ final class PedidoDistribucionVista
         }
 
         if ($request->query('ctx') === 'mayorista') {
-            return UsuarioRol::puedeGestionarDistribucionMayorista($user);
+            return UsuarioRol::esAdminGlobal($user) || UsuarioRol::puedeGestionarDistribucionMayorista($user);
         }
 
         return UsuarioRol::esMayorista($user) && ! UsuarioRol::esMinorista($user);

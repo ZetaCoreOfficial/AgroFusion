@@ -136,7 +136,8 @@ class AuthController extends Controller
             }
         }
 
-        return redirect()->route('dashboard');
+        // Vuelve a la pantalla que pidió sesión (p. ej. el QR de firma de recepción).
+        return redirect()->intended(route('dashboard'));
     }
 
     public function showRegisterForm()

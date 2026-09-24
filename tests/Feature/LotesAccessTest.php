@@ -35,13 +35,14 @@ class LotesAccessTest extends TestCase
         return $user;
     }
 
-    public function test_admin_puede_ver_y_crear_lotes(): void
+    public function test_admin_supervisa_lotes_pero_no_los_crea(): void
     {
         $admin = $this->createUser('admin');
         $this->actingAs($admin);
 
         $this->get(route('lotes.index'))->assertOk();
-        $this->get(route('lotes.create'))->assertOk();
+        $this->get(route('lotes.create'))->assertForbidden();
+        $this->post(route('lotes.store'), [])->assertForbidden();
     }
 
     public function test_agricultor_ve_sus_lotes_y_actividades_sin_crear_lotes(): void

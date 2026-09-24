@@ -31,6 +31,7 @@ use App\Models\Usuario;
 use App\Models\Vehiculo;
 
 use App\Models\CondicionTransporte;
+use App\Models\TipoIncidenteTransporte;
 use App\Services\CierreEnvioDistribucionPdvService;
 use App\Services\SimulacionRutaService;
 
@@ -140,13 +141,14 @@ class PedidoDistribucionFase2Test extends TestCase
 
 
 
-    /** @return array{0: Usuario, 1: Usuario, 2: Vehiculo, 3: Almacen, 4: PuntoVenta, 5: Insumo, 6: PedidoDistribucion} */
+    /** @return array{0: Usuario (mayorista), 1: Usuario, 2: Vehiculo, 3: Almacen, 4: PuntoVenta, 5: Insumo, 6: PedidoDistribucion} */
 
     private function escenarioPedidoConfirmado(): array
 
     {
 
-        $admin = $this->admin();
+        // El operador del flujo es el mayorista responsable del almacén: el admin solo supervisa.
+        $mayorista = $this->mayorista();
 
 
 
@@ -167,6 +169,8 @@ class PedidoDistribucionFase2Test extends TestCase
             'activo' => true,
 
             'ambito' => AlmacenAmbito::MAYORISTA,
+
+            'responsable_usuarioid' => $mayorista->usuarioid,
 
         ]);
 
@@ -191,6 +195,10 @@ class PedidoDistribucionFase2Test extends TestCase
             'activo' => true,
 
         ]);
+
+        // Rol canónico Spatie sincronizado con la columna legacy (TRA-09).
+        Role::findOrCreate('transportista', 'web');
+        $chofer->assignRole('transportista');
 
 
 
@@ -310,7 +318,7 @@ class PedidoDistribucionFase2Test extends TestCase
 
             'fecha_aceptacion' => now(),
 
-            'aceptado_por_usuarioid' => $admin->usuarioid,
+            'aceptado_por_usuarioid' => $mayorista->usuarioid,
 
         ]);
 
@@ -330,7 +338,7 @@ class PedidoDistribucionFase2Test extends TestCase
 
 
 
-        return [$admin, $chofer, $vehiculo, $almacen, $pdv, $insumo, $pedido];
+        return [$mayorista, $chofer, $vehiculo, $almacen, $pdv, $insumo, $pedido];
 
     }
 
@@ -340,9 +348,9 @@ class PedidoDistribucionFase2Test extends TestCase
 
     {
 
-        [$admin, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
 
 
 
@@ -376,13 +384,13 @@ class PedidoDistribucionFase2Test extends TestCase
 
 
 
-    public function test_empezar_ruta_como_admin_marca_en_transito_y_tiempo_real(): void
+    public function test_empezar_ruta_como_transportista_marca_en_transito_y_tiempo_real(): void
 
     {
 
-        [$admin, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
 
 
 
@@ -398,8 +406,15 @@ class PedidoDistribucionFase2Test extends TestCase
 
         $pedido->refresh();
 
-        $this->registrarCondicionesRutaPdv($pedido->rutaDistribucion, $admin);
+        $this->registrarCondicionesRutaPdv($pedido->rutaDistribucion, $chofer);
 
+        // Doble control: el admin supervisor no inicia el transporte.
+        $this->actingAs($this->admin());
+        $this->patch(route('punto-venta.pedidos.empezar-ruta', $pedido))->assertForbidden();
+
+        Role::findOrCreate('transportista', 'web');
+        $chofer->assignRole('transportista');
+        $this->actingAs($chofer);
         $response = $this->patch(route('punto-venta.pedidos.empezar-ruta', $pedido));
 
 
@@ -420,13 +435,11 @@ class PedidoDistribucionFase2Test extends TestCase
 
     {
 
-        [$admin, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
-
-        $mayorista = $this->mayorista();
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
 
 
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
 
         $this->post(route('punto-venta.pedidos.designar-transportista', $pedido), [
 
@@ -456,9 +469,9 @@ class PedidoDistribucionFase2Test extends TestCase
 
     {
 
-        [$admin, $chofer, $vehiculo, , , $insumo, $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , , $insumo, $pedido] = $this->escenarioPedidoConfirmado();
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
 
 
 
@@ -478,7 +491,7 @@ class PedidoDistribucionFase2Test extends TestCase
 
         $this->assertNotNull($ruta);
 
-        $this->registrarCondicionesRutaPdv($ruta, $admin);
+        $this->registrarCondicionesRutaPdv($ruta, $chofer);
 
         app(SimulacionRutaService::class)->empezarDistribucion($ruta);
 
@@ -488,7 +501,19 @@ class PedidoDistribucionFase2Test extends TestCase
 
 
 
-        app(SimulacionRutaService::class)->completarDistribucion($ruta->fresh());
+        // Cierre canónico: llegada, incidentes, firma del chofer, firma del minorista y finalización.
+        $ruta->refresh()->update(['simulacion_inicio_at' => now()->subHour()]);
+        TipoIncidenteTransporte::query()->firstOrCreate(['codigo' => 'INC_PDV_TEST'], ['titulo' => 'Retraso', 'descripcion' => 'Test']);
+        $cierre = app(CierreEnvioDistribucionPdvService::class);
+        $cierre->confirmarLlegada($ruta->fresh(), $chofer);
+        $cierre->registrarIncidentes($ruta->fresh(), $chofer, true);
+        $cierre->guardarFirmaTransportista($ruta->fresh(), $chofer, 'data:image/png;base64,iVBORw0KGgo=');
+
+        $minorista = $pedido->puntoVenta->minorista()->firstOrFail();
+        Role::findOrCreate('minorista', 'web');
+        $minorista->syncRoles(['minorista']);
+        $cierre->guardarFirmaRecepcion($ruta->fresh(), $minorista, 'data:image/png;base64,iVBORw0KGgo=');
+        $cierre->finalizarEntrega($ruta->fresh(), $chofer);
 
 
 
@@ -512,7 +537,7 @@ class PedidoDistribucionFase2Test extends TestCase
 
     public function test_minorista_ve_confirmacion_envio_mayorista_en_pedido(): void
     {
-        [$admin, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
 
         $minorista = Usuario::query()->where('email', 'minorista.fase2@test.local')->firstOrFail();
         Role::findOrCreate('minorista', 'web');
@@ -520,10 +545,10 @@ class PedidoDistribucionFase2Test extends TestCase
         $pedido->update([
             'envio_iniciado_mayorista' => true,
             'fecha_confirmacion_minorista' => null,
-            'creado_por_usuarioid' => $admin->usuarioid,
+            'creado_por_usuarioid' => $mayorista->usuarioid,
         ]);
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
         $this->post(route('punto-venta.pedidos.designar-transportista', $pedido), [
             'transportista_usuarioid' => $chofer->usuarioid,
             'vehiculoid' => $vehiculo->vehiculoid,
@@ -541,7 +566,7 @@ class PedidoDistribucionFase2Test extends TestCase
 
     public function test_minorista_puede_confirmar_envio_iniciado_por_mayorista(): void
     {
-        [$admin, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
 
         $minorista = Usuario::query()->where('email', 'minorista.fase2@test.local')->firstOrFail();
         Role::findOrCreate('minorista', 'web');
@@ -549,10 +574,10 @@ class PedidoDistribucionFase2Test extends TestCase
         $pedido->update([
             'envio_iniciado_mayorista' => true,
             'fecha_confirmacion_minorista' => null,
-            'creado_por_usuarioid' => $admin->usuarioid,
+            'creado_por_usuarioid' => $mayorista->usuarioid,
         ]);
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
         $this->post(route('punto-venta.pedidos.designar-transportista', $pedido), [
             'transportista_usuarioid' => $chofer->usuarioid,
             'vehiculoid' => $vehiculo->vehiculoid,
@@ -573,14 +598,14 @@ class PedidoDistribucionFase2Test extends TestCase
 
     public function test_mayorista_ve_paso_confirmacion_minorista_no_en_ruta(): void
     {
-        [$admin, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
 
         $pedido->update([
             'envio_iniciado_mayorista' => true,
             'fecha_confirmacion_minorista' => null,
         ]);
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
         $this->post(route('punto-venta.pedidos.designar-transportista', $pedido), [
             'transportista_usuarioid' => $chofer->usuarioid,
             'vehiculoid' => $vehiculo->vehiculoid,
@@ -596,14 +621,14 @@ class PedidoDistribucionFase2Test extends TestCase
 
     public function test_transportista_no_puede_registrar_condiciones_sin_confirmacion_minorista(): void
     {
-        [$admin, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
 
         $pedido->update([
             'envio_iniciado_mayorista' => true,
             'fecha_confirmacion_minorista' => null,
         ]);
 
-        $this->actingAs($admin);
+        $this->actingAs($mayorista);
         $this->post(route('punto-venta.pedidos.designar-transportista', $pedido), [
             'transportista_usuarioid' => $chofer->usuarioid,
             'vehiculoid' => $vehiculo->vehiculoid,
@@ -644,6 +669,38 @@ class PedidoDistribucionFase2Test extends TestCase
         $resumen = $cierre->resumenPasos($ruta->fresh());
         $this->assertTrue($resumen['condiciones_vigentes']);
         $this->assertTrue($resumen['puede_empezar_ruta']);
+    }
+
+    public function test_admin_no_firma_como_transportista_ni_como_receptor(): void
+    {
+        [$mayorista, $chofer, $vehiculo, , , , $pedido] = $this->escenarioPedidoConfirmado();
+
+        $this->actingAs($mayorista);
+        $this->post(route('punto-venta.pedidos.designar-transportista', $pedido), [
+            'transportista_usuarioid' => $chofer->usuarioid,
+            'vehiculoid' => $vehiculo->vehiculoid,
+        ]);
+        $ruta = $pedido->fresh()->rutaDistribucion;
+        $this->assertNotNull($ruta);
+
+        $admin = $this->admin();
+        $cierre = app(CierreEnvioDistribucionPdvService::class);
+        $firma = 'data:image/png;base64,iVBORw0KGgo=';
+
+        foreach (['guardarFirmaTransportista', 'guardarFirmaRecepcion'] as $metodo) {
+            try {
+                $cierre->{$metodo}($ruta->fresh(), $admin, $firma);
+                $this->fail("El admin no debería poder ejecutar {$metodo}.");
+            } catch (\InvalidArgumentException $e) {
+                // Debe fallar por autorización (antes de validar llegada/incidentes).
+                $this->assertMatchesRegularExpression('/Solo el transportista asignado|No tiene permiso/', $e->getMessage());
+            }
+        }
+
+        $this->actingAs($admin);
+        $this->post(route('punto-venta.rutas.cierre.firma-transportista', $ruta), ['firma' => $firma])->assertForbidden();
+        $this->post(route('punto-venta.rutas.cierre.firma-recepcion', $ruta), ['firma' => $firma])->assertForbidden();
+        $this->patch(route('punto-venta.rutas.cierre.confirmar-llegada', $ruta))->assertForbidden();
     }
 
     private function registrarCondicionesRutaPdv(?\App\Models\RutaDistribucion $ruta, Usuario $usuario): void

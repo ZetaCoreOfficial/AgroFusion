@@ -103,6 +103,14 @@ class TrasladoPlantaMayoristaService
 
         }
 
+        // MAY-BUG-01: un traslado a un almacén sin mayorista responsable activo quedaba entregado
+        // (se veía en movimientos) pero ningún mayorista lo veía ni podía recibirlo.
+        if (\App\Support\MayoristaAccess::responsableMayorista($mayoristaDestino) === null) {
+
+            throw new InvalidArgumentException('El almacén mayorista destino no tiene un mayorista responsable activo. Asígnelo antes de enviar el traslado.');
+
+        }
+
 
 
         $plantasRecogida = $this->resolverPlantasRecogida($plantaOrigen, $recogidasPlantasExtraIds);
@@ -377,7 +385,8 @@ class TrasladoPlantaMayoristaService
 
     {
 
-        $ruta->loadMissing([
+        // load (no loadMissing): las cantidades recibidas se registran al firmar y deben leerse frescas.
+        $ruta->load([
 
             'detallesTraslado.insumo.unidadMedida',
 
@@ -414,6 +423,26 @@ class TrasladoPlantaMayoristaService
         }
 
 
+
+        // Receptor real (MAY-08): el inventario solo se acredita si el mayorista dueño del destino
+        // firmó la recepción con su cuenta; un cierre manual o un tercero no la sustituyen.
+        $ruta->loadMissing('firmaRecepcion');
+        $firma = $ruta->firmaRecepcion;
+        $firmante = $firma !== null && $firma->firmante_usuarioid ? Usuario::query()->find($firma->firmante_usuarioid) : null;
+        if ($firmante === null
+            || ! \App\Support\FirmaCierreReglas::recepcionValida($firma, $ruta->transportista_usuarioid)
+            || ! \App\Support\MayoristaAccess::puedeGestionarTraslado($firmante, $ruta)) {
+            throw new InvalidArgumentException('El mayorista del almacén destino debe firmar la recepción antes de acreditar el inventario.');
+        }
+
+        // Idempotencia: la transferencia de un traslado se aplica una sola vez.
+        if (AlmacenMovimiento::query()
+            ->where('almacenid', $almacenMayorista->almacenid)
+            ->where('referencia', $ruta->codigo)
+            ->where('observaciones', 'like', '[Traslado planta → mayorista — ingreso]%')
+            ->exists()) {
+            throw new InvalidArgumentException('El inventario de este traslado ya fue transferido.');
+        }
 
         $tipoIngreso = TipoMovimientoAlmacen::activosPorNaturaleza('ingreso')->firstOrFail();
 
@@ -748,6 +777,15 @@ class TrasladoPlantaMayoristaService
 
         $cantidadUnidades = (float) ($detalle->cantidad_unidades ?? 0);
 
+        // MAY-14: sale de planta lo despachado; al mayorista se acredita solo lo recibido.
+        $factorRecibido = $detalle->factorRecibido();
+        $kgRecibidos = round($cantidad * $factorRecibido, 4);
+        $unidadesRecibidas = round($cantidadUnidades * $factorRecibido, 4);
+        $notaDiferencia = $factorRecibido < 0.99999
+            ? ' · Recibido '.number_format((float) $detalle->cantidad_recibida, 2).' de '
+                .number_format($detalle->cantidadDespachada(), 2).' (diferencia: '.($detalle->motivo_diferencia ?: 'sin motivo').')'
+            : '';
+
         $insumoOrigen = $detalle->insumo;
 
         $detalle->loadMissing(['presentacion', 'inventarioLote']);
@@ -872,15 +910,15 @@ class TrasladoPlantaMayoristaService
 
             'fecha' => now()->toDateString(),
 
-            'cantidad' => $cantidad,
+            'cantidad' => $kgRecibidos,
 
-            'cantidad_unidades' => $cantidadUnidades > 0 ? $cantidadUnidades : null,
+            'cantidad_unidades' => $unidadesRecibidas > 0 ? $unidadesRecibidas : null,
 
             'referencia' => $ref,
 
             'destino_motivo' => $almacenMayorista->nombre,
 
-            'observaciones' => '[Traslado planta → mayorista — ingreso] '.$ref,
+            'observaciones' => '[Traslado planta → mayorista — ingreso] '.$ref.$notaDiferencia,
 
         ]);
 
@@ -890,7 +928,7 @@ class TrasladoPlantaMayoristaService
 
             $this->inventarioPresentacion->descontar($detalle->inventarioLote, $cantidadUnidades, $cantidad);
 
-            if ($detalle->presentacion) {
+            if ($detalle->presentacion && $unidadesRecibidas > 0) {
 
                 $presentacionDestino = $this->inventarioPresentacion->replicarPresentacionEnInsumo(
 
@@ -912,9 +950,9 @@ class TrasladoPlantaMayoristaService
 
                     $detalle->inventarioLote->referencia_lote,
 
-                    $cantidadUnidades,
+                    $unidadesRecibidas,
 
-                    $cantidad
+                    $kgRecibidos
 
                 );
 
@@ -931,7 +969,9 @@ class TrasladoPlantaMayoristaService
 
             $insumoOrigen->decrementarStock($cantidad);
 
-            $insumoDestino->incrementarStock($cantidad);
+            if ($kgRecibidos > 0) {
+                $insumoDestino->incrementarStock($kgRecibidos);
+            }
 
             $this->descontarAlmacenajePlanta(
                 (int) $insumoOrigen->almacenid,
@@ -1012,35 +1052,9 @@ class TrasladoPlantaMayoristaService
 
     {
 
-        $transportista = Usuario::query()
+        $transportista = Usuario::query()->with('perfilTransportista')->find($transportistaId);
 
-            ->with('perfilTransportista')
-
-            ->where('usuarioid', $transportistaId)
-
-            ->where('role', 'transportista')
-
-            ->where('activo', true)
-
-            ->first();
-
-
-
-        if ($transportista === null) {
-
-            throw new InvalidArgumentException('El transportista seleccionado no está disponible.');
-
-        }
-
-
-
-        $ambito = $transportista->perfilTransportista?->ambito_flota ?? TransportistaFlotaCatalogo::AGRICOLA;
-
-        if ($ambito !== TransportistaFlotaCatalogo::PLANTA) {
-
-            throw new InvalidArgumentException('Seleccione un chofer de flota planta.');
-
-        }
+        \App\Support\TransportistaPool::asegurarAsignable($transportista, TransportistaFlotaCatalogo::PLANTA);
 
 
 
@@ -1075,6 +1089,9 @@ class TrasladoPlantaMayoristaService
             throw new InvalidArgumentException('Seleccione un vehículo de flota planta.');
 
         }
+
+        // Licencia compatible, vehículo operativo y no en ruta (TRA-10): antes solo se validaba en M → PDV.
+        $this->capacidadTransporte->validarAsignacion($transportista, $vehiculo->loadMissing('tipoVehiculo'));
 
     }
 

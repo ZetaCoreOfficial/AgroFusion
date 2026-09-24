@@ -257,9 +257,18 @@
                 <div class="bg-white border rounded p-3 mb-3" style="white-space:pre-wrap;">{{ $usuario->carta_motivacion }}</div>
                 @can('solicitudes.approve')
                 <div class="d-flex flex-wrap" style="gap:8px;">
-                    <form action="{{ route('gestion.solicitud.aprobar', $usuario) }}" method="POST">@csrf
+                    <form action="{{ route('gestion.solicitud.aprobar', $usuario) }}" method="POST" class="d-flex flex-wrap align-items-center" style="gap:8px;">@csrf
+                        @if(($usuario->rol_solicitado ?? '') === 'transportista')
+                            <select name="ambito_flota" class="form-control form-control-sm w-auto @error('ambito_flota') is-invalid @enderror" required aria-label="Flota del transportista">
+                                <option value="">Flota del transportista…</option>
+                                @foreach(\App\Support\TransportistaFlotaCatalogo::etiquetas() as $valorFlota => $etiquetaFlota)
+                                    <option value="{{ $valorFlota }}" @selected(old('ambito_flota') === $valorFlota)>{{ $etiquetaFlota }}</option>
+                                @endforeach
+                            </select>
+                        @endif
                         <button type="submit" class="btn btn-success"><i class="fas fa-check mr-1"></i> Aprobar</button>
                     </form>
+                    @error('ambito_flota')<div class="w-100 small text-danger">{{ $message }}</div>@enderror
                     <form action="{{ route('gestion.solicitud.rechazar', $usuario) }}" method="POST"
                         onsubmit="return confirm('¿Rechazar esta solicitud? Se eliminará del sistema.')">@csrf
                         <button type="submit" class="btn btn-outline-danger"><i class="fas fa-times mr-1"></i> Rechazar</button>

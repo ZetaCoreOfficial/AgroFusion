@@ -64,7 +64,7 @@ class OrgTrackAccessTest extends TestCase
         $transportista = $this->createUserWithRole('transportista');
         $this->actingAs($transportista);
 
-        $this->get(route('envios.reportes-distribucion'))->assertOk();
+        $this->get(route('envios.reportes-distribucion'))->assertForbidden();
         $this->get(route('envios.vehiculos'))->assertForbidden();
     }
 

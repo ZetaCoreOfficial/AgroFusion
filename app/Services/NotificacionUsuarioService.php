@@ -151,8 +151,8 @@ class NotificacionUsuarioService
         $admins = Usuario::query()
             ->where('activo', true)
             ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'Admin']));
+                $q->whereIn('role', UsuarioRol::nombresRolAdmin())
+                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', UsuarioRol::nombresRolAdmin()));
             })
             ->get();
 
@@ -348,8 +348,8 @@ class NotificacionUsuarioService
         $destinatarios = Usuario::query()
             ->where('activo', true)
             ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'jefe_planta', 'jefe_agricultor']));
+                $q->whereIn('role', UsuarioRol::nombresRolAdmin())
+                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', [...UsuarioRol::nombresRolAdmin(), 'jefe_planta', 'jefe_agricultor']));
             })
             ->get();
 
@@ -381,8 +381,8 @@ class NotificacionUsuarioService
         $destinatarios = Usuario::query()
             ->where('activo', true)
             ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'jefe_planta']));
+                $q->whereIn('role', UsuarioRol::nombresRolAdmin())
+                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', [...UsuarioRol::nombresRolAdmin(), 'jefe_planta']));
             })
             ->get();
 
@@ -713,8 +713,8 @@ class NotificacionUsuarioService
         $supervisores = Usuario::query()
             ->where('activo', true)
             ->where(function ($q) {
-                $q->whereIn('role', ['admin', 'Admin'])
-                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['admin', 'jefe_planta']));
+                $q->whereIn('role', UsuarioRol::nombresRolAdmin())
+                    ->orWhereHas('roles', fn ($r) => $r->whereIn('name', [...UsuarioRol::nombresRolAdmin(), 'jefe_planta']));
             })
             ->get();
 

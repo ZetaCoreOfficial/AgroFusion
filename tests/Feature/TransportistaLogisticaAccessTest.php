@@ -54,7 +54,7 @@ class TransportistaLogisticaAccessTest extends TestCase
         $this->get(route('pedidos.create'))->assertForbidden();
         $this->get(route('envios.transportistas'))->assertForbidden();
         $this->get(route('envios.vehiculos'))->assertForbidden();
-        // Tiene envios.view pero el ítem no aparece en menú para transportista.
-        $this->get(route('envios.reportes-distribucion'))->assertOk();
+        // Reporte global de distribución: no es de su producto → 403 real, no solo ocultar el menú (TRA-14).
+        $this->get(route('envios.reportes-distribucion'))->assertForbidden();
     }
 }

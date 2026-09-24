@@ -24,6 +24,8 @@ class DetalleTrasladoPlantaMayorista extends Model
         'cantidad',
         'cantidad_unidades',
         'observaciones',
+        'cantidad_recibida',
+        'motivo_diferencia',
     ];
 
     protected $casts = [
@@ -35,7 +37,27 @@ class DetalleTrasladoPlantaMayorista extends Model
         'loteproduccionpedidoid' => 'integer',
         'cantidad' => 'float',
         'cantidad_unidades' => 'float',
+        'cantidad_recibida' => 'float',
     ];
+
+    /** Cantidad despachada en la unidad principal de la línea (unidades si es por presentación, kg si no). */
+    public function cantidadDespachada(): float
+    {
+        return (float) ($this->cantidad_unidades ?? 0) > 0
+            ? (float) $this->cantidad_unidades
+            : (float) $this->cantidad;
+    }
+
+    /** Proporción recibida sobre lo despachado (1 si no se registró diferencia). */
+    public function factorRecibido(): float
+    {
+        $despachado = $this->cantidadDespachada();
+        if ($this->cantidad_recibida === null || $despachado <= 0) {
+            return 1.0;
+        }
+
+        return max(0.0, min(1.0, (float) $this->cantidad_recibida / $despachado));
+    }
 
     public function ruta(): BelongsTo
     {

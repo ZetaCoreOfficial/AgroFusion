@@ -176,7 +176,15 @@ class PedidoController extends Controller
             $almacenes = AlmacenAmbito::scope(
                 Almacen::query()->where('activo', true),
                 $ambito
-            )->orderBy('nombre')->get();
+            )
+                // Destino mayorista solo con dueño que pueda recibirlo (MAY-BUG-01).
+                ->when($ambito === AlmacenAmbito::MAYORISTA, fn ($q) => $q->whereHas(
+                    'responsable',
+                    fn ($r) => $r->where('activo', true)
+                        ->whereHas('roles', fn ($rol) => $rol->whereIn('name', ['mayorista', 'jefe_mayorista']))
+                ))
+                ->orderBy('nombre')
+                ->get();
 
             foreach ($almacenes as $almacen) {
                 $resuelto = UbicacionGpsParser::resolverAlmacen(

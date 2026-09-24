@@ -12,6 +12,7 @@ use App\Models\InsumoPresentacion;
 use App\Services\InventarioAlmacenProductoService;
 use App\Services\InventarioPresentacionService;
 use App\Support\InsumoImagenCatalogo;
+use App\Support\MayoristaAccess;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -22,7 +23,7 @@ class AlmacenInventarioController extends Controller
     public function show(Request $request, Almacen $almacen, Insumo $insumo, InventarioPresentacionService $inventarioPresentacion): View
     {
         $ctx = AlmacenAmbito::contexto($request);
-        $this->autorizarProducto($almacen, $insumo, $ctx['ambito']);
+        $this->autorizarProducto($request, $almacen, $insumo, $ctx['ambito'], gestion: false);
 
         $insumo->load(['tipo', 'unidadMedida', 'almacen']);
         $estadoStock = InsumoCatalogo::estadoStockAlmacen($insumo);
@@ -68,7 +69,7 @@ class AlmacenInventarioController extends Controller
     public function edit(Request $request, Almacen $almacen, Insumo $insumo): View
     {
         $ctx = AlmacenAmbito::contexto($request);
-        $this->autorizarProducto($almacen, $insumo, $ctx['ambito']);
+        $this->autorizarProducto($request, $almacen, $insumo, $ctx['ambito'], gestion: true);
 
         $insumo->load(['tipo', 'unidadMedida', 'almacen']);
 
@@ -83,7 +84,7 @@ class AlmacenInventarioController extends Controller
     public function update(Request $request, Almacen $almacen, Insumo $insumo): RedirectResponse
     {
         $ctx = AlmacenAmbito::contexto($request);
-        $this->autorizarProducto($almacen, $insumo, $ctx['ambito']);
+        $this->autorizarProducto($request, $almacen, $insumo, $ctx['ambito'], gestion: true);
 
         $data = $request->validate([
             'nombre' => 'required|string|max:100',
@@ -117,7 +118,7 @@ class AlmacenInventarioController extends Controller
         InventarioAlmacenProductoService $inventarioAlmacen
     ): RedirectResponse {
         $ctx = AlmacenAmbito::contexto($request);
-        $this->autorizarProducto($almacen, $insumo, $ctx['ambito']);
+        $this->autorizarProducto($request, $almacen, $insumo, $ctx['ambito'], gestion: true);
 
         $inventarioAlmacen->eliminarProducto($almacen, $insumo);
 
@@ -179,7 +180,7 @@ class AlmacenInventarioController extends Controller
         }
     }
 
-    private function autorizarProducto(Almacen $almacen, Insumo $insumo, string $ambito): void
+    private function autorizarProducto(Request $request, Almacen $almacen, Insumo $insumo, string $ambito, bool $gestion): void
     {
         abort_unless(
             in_array($ambito, [AlmacenAmbito::MAYORISTA, AlmacenAmbito::PLANTA], true),
@@ -191,6 +192,15 @@ class AlmacenInventarioController extends Controller
             && (int) $insumo->almacenid === (int) $almacen->almacenid,
             404
         );
+
+        // Ownership (MAY-06): el inventario de un almacén mayorista ajeno no se ve, edita, ajusta ni elimina.
+        if ($ambito === AlmacenAmbito::MAYORISTA) {
+            if ($gestion) {
+                MayoristaAccess::asegurarPuedeGestionar($request->user(), $almacen);
+            } else {
+                MayoristaAccess::asegurarPuedeVer($request->user(), $almacen);
+            }
+        }
 
         InsumoCatalogo::asegurarInsumoGestionable($insumo);
 

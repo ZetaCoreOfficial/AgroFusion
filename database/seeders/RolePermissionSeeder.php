@@ -25,12 +25,7 @@ class RolePermissionSeeder extends Seeder
 
         foreach (array_keys($rolePermissions) as $roleName) {
             $role = Role::firstOrCreate(['name' => $roleName, 'guard_name' => 'web']);
-            $assigned = $rolePermissions[$roleName] ?? [];
-            if (in_array('*', $assigned, true)) {
-                $role->syncPermissions($permissions);
-                continue;
-            }
-            $role->syncPermissions($assigned);
+            $role->syncPermissions($rolePermissions[$roleName] ?? []);
         }
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();

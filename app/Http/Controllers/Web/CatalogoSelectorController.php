@@ -89,7 +89,7 @@ class CatalogoSelectorController extends Controller
 
         // El administrador supervisa el sistema; no es responsable operativo de parcelas.
         if (! $incluirSelfActor && ! $request->boolean('incluir_admin')) {
-            $query->whereNotIn('role', ['admin', 'Admin']);
+            $query->whereNotIn('role', UsuarioRol::nombresRolAdmin());
         }
 
         if ($request->boolean('solo_empleados_equipo') && $request->filled('supervisor_usuarioid')) {
@@ -117,16 +117,10 @@ class CatalogoSelectorController extends Controller
         if ($esTransportista) {
             $query->with('perfilTransportista.vehiculo');
 
+            // Pool por ámbito (TRA-04, MAY-17): sin perfil no hay ámbito implícito «agrícola»; se excluyen
+            // conductores inactivos, no disponibles, sin rol Spatie o con un viaje en curso.
             if ($request->filled('ambito_flota') && in_array($request->string('ambito_flota')->toString(), TransportistaFlotaCatalogo::valores(), true)) {
-                $ambito = $request->string('ambito_flota')->toString();
-                if ($ambito === TransportistaFlotaCatalogo::AGRICOLA) {
-                    $query->where(function (Builder $q) {
-                        $q->whereDoesntHave('perfilTransportista')
-                            ->orWhereHas('perfilTransportista', fn (Builder $p) => $p->where('ambito_flota', TransportistaFlotaCatalogo::AGRICOLA));
-                    });
-                } else {
-                    $query->whereHas('perfilTransportista', fn (Builder $p) => $p->where('ambito_flota', $ambito));
-                }
+                \App\Support\TransportistaPool::scopePool($query, $request->string('ambito_flota')->toString());
             }
 
             if ($request->string('con_vehiculo')->toString() === '1') {

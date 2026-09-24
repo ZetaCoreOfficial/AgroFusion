@@ -30,8 +30,6 @@ use App\Services\AlmacenCapacidadService;
 
 use App\Services\InventarioPresentacionService;
 
-use App\Services\PedidoDistribucionSalidaMayoristaService;
-
 use App\Services\ProductoPlantaInventarioService;
 
 use App\Services\UbicacionesAlmacenService;
@@ -263,14 +261,11 @@ class AlmacenController extends Controller
         $ctx = AlmacenAmbito::contexto($request);
 
         $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: false);
 
+        // Un GET de visualización no descuenta stock ni crea movimientos (MAY-07): la salida
+        // mayorista se registra al iniciar la ruta, dentro de su transacción.
         $almacen->load(['unidadMedida', 'almacenamientos']);
-
-        if (($almacen->ambito ?? '') === AlmacenAmbito::MAYORISTA && $request->user() !== null) {
-            app(PedidoDistribucionSalidaMayoristaService::class)
-                ->reconciliarSalidasPendientesAlmacen($almacen, $request->user());
-            $almacen->refresh();
-        }
 
         $resumenCapacidad = $this->capacidadService->resumen($almacen);
 
@@ -306,6 +301,7 @@ class AlmacenController extends Controller
         $ctx = AlmacenAmbito::contexto($request);
 
         $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
 
 
@@ -330,6 +326,7 @@ class AlmacenController extends Controller
         $ctx = AlmacenAmbito::contexto($request);
 
         $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
 
 
@@ -374,6 +371,7 @@ class AlmacenController extends Controller
         $ctx = AlmacenAmbito::contexto($request);
 
         $this->asegurarAmbitoAlmacen($almacen, $ctx['ambito']);
+        $this->asegurarAccesoAlmacen($request, $almacen, $ctx['ambito'], gestion: true);
 
         $eval = \App\Support\AlmacenEliminacionCatalogo::evaluar($almacen);
         if (! $eval['ok']) {
@@ -424,6 +422,26 @@ class AlmacenController extends Controller
 
         }
 
+    }
+
+    /**
+     * Ownership del almacén mayorista (MAY-02): ver exige que sea propio (o supervisión del admin);
+     * editar/eliminar exige operarlo. Así un mayorista no abre, edita ni se vuelve responsable
+     * de un almacén ajeno cambiando el id en la URL.
+     */
+    private function asegurarAccesoAlmacen(Request $request, Almacen $almacen, string $ambito, bool $gestion): void
+    {
+        if ($ambito !== AlmacenAmbito::MAYORISTA) {
+            return;
+        }
+
+        if ($gestion) {
+            MayoristaAccess::asegurarPuedeGestionar($request->user(), $almacen);
+
+            return;
+        }
+
+        MayoristaAccess::asegurarPuedeVer($request->user(), $almacen);
     }
 
 

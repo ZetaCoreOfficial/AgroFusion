@@ -7,6 +7,7 @@ use App\Models\CertificacionLote;
 use App\Models\EstadoLoteTipo;
 use App\Models\HistorialEstadoLote;
 use App\Models\Lote;
+use App\Services\Blockchain\CertificacionBlockchainService;
 use App\Support\CertificacionIndexService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,8 @@ use Illuminate\View\View;
 class CertificacionController extends Controller
 {
     public function __construct(
-        private CertificacionIndexService $indexService
+        private CertificacionIndexService $indexService,
+        private CertificacionBlockchainService $blockchainService,
     ) {}
 
     public function index(Request $request): View|RedirectResponse
@@ -119,6 +121,30 @@ class CertificacionController extends Controller
         ]);
 
         return view('certificaciones.show', ['cert' => $certificacion]);
+    }
+
+    public function sincronizarBlockchain(CertificacionLote $certificacion): RedirectResponse
+    {
+        if (! $certificacion->esCertificado()) {
+            return back()->with('warning', 'Solo las certificaciones conformes pueden sincronizarse con blockchain.');
+        }
+
+        if (! in_array($certificacion->blockchain_estado, [
+            CertificacionLote::BLOCKCHAIN_PENDIENTE,
+            CertificacionLote::BLOCKCHAIN_ERROR,
+        ], true)) {
+            return back()->with('info', 'Esta certificación no tiene una solicitud blockchain pendiente para sincronizar.');
+        }
+
+        $this->blockchainService->enviar((int) $certificacion->certificacionid);
+        $certificacion->refresh();
+
+        return match ($certificacion->blockchain_estado) {
+            CertificacionLote::BLOCKCHAIN_CERTIFICADA => back()->with('success', 'Certificación blockchain actualizada. Tx ID recibido.'),
+            CertificacionLote::BLOCKCHAIN_RECHAZADA => back()->with('warning', 'La solicitud blockchain fue rechazada.'),
+            CertificacionLote::BLOCKCHAIN_ERROR => back()->with('error', 'No se pudo sincronizar con blockchain: '.$certificacion->blockchain_error),
+            default => back()->with('info', 'La solicitud blockchain continúa pendiente de aprobación.'),
+        };
     }
 
     private function evaluarLote(int $loteid, string $resultado, ?string $observaciones, ?string $recomendaciones = null): void

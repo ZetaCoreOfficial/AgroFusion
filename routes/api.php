@@ -40,7 +40,27 @@ use App\Http\Controllers\Api\TipoAlmacenController;
 use App\Http\Controllers\Api\AlmacenController;
 use App\Http\Controllers\Api\ProduccionAlmacenamientoController;
 
-Route::name('api.')->group(function () {
+/**
+ * Registra un apiResource exigiendo auth:sanctum y el permiso de la matriz según el verbo:
+ * index/show → read, store → create, update → update, destroy → delete.
+ * Si $accionUnica se indica, todos los verbos exigen esa acción (p. ej. usuarios,admin).
+ */
+$recursoProtegido = function (string $uri, string $controller, string $modulo, ?string $accionUnica = null): void {
+    $verbos = [
+        'read' => ['index', 'show'],
+        'create' => ['store'],
+        'update' => ['update'],
+        'delete' => ['destroy'],
+    ];
+
+    foreach ($verbos as $accion => $metodos) {
+        Route::apiResource($uri, $controller)
+            ->only($metodos)
+            ->middleware(['auth:sanctum', 'action.permission:'.$modulo.','.($accionUnica ?? $accion)]);
+    }
+};
+
+Route::name('api.')->group(function () use ($recursoProtegido) {
 
     // ENDPOINT DE PRUEBA
     Route::get('/test-api', function () {
@@ -50,32 +70,25 @@ Route::name('api.')->group(function () {
     // ========================================================
     // GRUPO: CATÁLOGOS
     // ========================================================
-    Route::apiResource('tipoactividades', TipoActividadController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
-    Route::apiResource('prioridades', PrioridadController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
-    Route::apiResource('tipoinsumos', TipoInsumoController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
-    Route::apiResource('unidadesmedida', UnidadMedidaController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
-    Route::apiResource('cultivos', CultivoController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
-    Route::apiResource('estadolote-tipos', EstadoLoteTipoController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
-    Route::apiResource('destinoproducciones', DestinoProduccionController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
-    Route::apiResource('estadolote-insumos', EstadoLoteInsumoController::class)
-        ->middleware(['auth:sanctum', 'action.permission:catalogos,read']);
+    $recursoProtegido('tipoactividades', TipoActividadController::class, 'catalogos');
+    $recursoProtegido('prioridades', PrioridadController::class, 'catalogos');
+    $recursoProtegido('tipoinsumos', TipoInsumoController::class, 'catalogos');
+    $recursoProtegido('unidadesmedida', UnidadMedidaController::class, 'catalogos');
+    $recursoProtegido('cultivos', CultivoController::class, 'catalogos');
+    $recursoProtegido('estadolote-tipos', EstadoLoteTipoController::class, 'catalogos');
+    $recursoProtegido('destinoproducciones', DestinoProduccionController::class, 'catalogos');
+    $recursoProtegido('estadolote-insumos', EstadoLoteInsumoController::class, 'catalogos');
 
     // 🔹 nuevos catálogos de almacenamiento
-    Route::apiResource('tipo-almacenes', TipoAlmacenController::class);
+    $recursoProtegido('tipo-almacenes', TipoAlmacenController::class, 'catalogos');
 
     // ========================================================
     // GRUPO: USUARIOS Y ROLES
     // ========================================================
-    Route::apiResource('roles', RolController::class);
-    Route::apiResource('usuarios', UsuarioController::class);
-    Route::apiResource('usuario-roles', UsuarioRolController::class);
+    // Solo administración de usuarios (usuarios.admin): la API no acota por jefe/empleado.
+    $recursoProtegido('roles', RolController::class, 'usuarios', 'admin');
+    $recursoProtegido('usuarios', UsuarioController::class, 'usuarios', 'admin');
+    $recursoProtegido('usuario-roles', UsuarioRolController::class, 'usuarios', 'admin');
 
     // ========================================================
     // GRUPO: LOTES Y PRODUCCIÓN
@@ -90,19 +103,24 @@ Route::name('api.')->group(function () {
         ->middleware(['auth:sanctum', 'action.permission:lotes,update']);
     Route::delete('lotes/{lote}', [LoteController::class, 'destroy'])
         ->middleware(['auth:sanctum', 'action.permission:lotes,delete']);
-    Route::apiResource('estadolotes', EstadoLoteController::class);
-    Route::apiResource('producciones', ProduccionController::class);
-    Route::apiResource('historial-estados-lote', HistorialEstadoLoteController::class);
+    $recursoProtegido('estadolotes', EstadoLoteController::class, 'lotes');
+    $recursoProtegido('producciones', ProduccionController::class, 'lotes');
+    $recursoProtegido('historial-estados-lote', HistorialEstadoLoteController::class, 'lotes');
 
     // ========================================================
     // GRUPO: ALMACENES Y ALMACENAMIENTO
     // ========================================================
-    Route::apiResource('almacenes', AlmacenController::class);
-    Route::apiResource('producciones-almacenamiento', ProduccionAlmacenamientoController::class);
+    $recursoProtegido('almacenes', AlmacenController::class, 'inventario');
+    $recursoProtegido('producciones-almacenamiento', ProduccionAlmacenamientoController::class, 'inventario');
     Route::get('almacen-movimientos', [AlmacenMovimientoController::class, 'index'])
         ->middleware(['auth:sanctum', 'action.permission:almacen_movimientos,read']);
-    Route::post('almacen-movimientos/{naturaleza}', [AlmacenMovimientoController::class, 'store'])
-        ->middleware(['auth:sanctum', 'action.permission:almacen_movimientos,read']);
+    // Escritura: exige el permiso de creación de ingreso/salida en la ruta (no el de lectura).
+    Route::post('almacen-movimientos/ingreso', [AlmacenMovimientoController::class, 'store'])
+        ->defaults('naturaleza', 'ingreso')
+        ->middleware(['auth:sanctum', 'action.permission:almacen_ingresos,create']);
+    Route::post('almacen-movimientos/salida', [AlmacenMovimientoController::class, 'store'])
+        ->defaults('naturaleza', 'salida')
+        ->middleware(['auth:sanctum', 'action.permission:almacen_salidas,create']);
 
     // ========================================================
     // GRUPO: INSUMOS Y APLICACIONES
@@ -117,13 +135,13 @@ Route::name('api.')->group(function () {
         ->middleware(['auth:sanctum', 'action.permission:inventario,update']);
     Route::delete('insumos/{insumo}', [InsumoController::class, 'destroy'])
         ->middleware(['auth:sanctum', 'action.permission:inventario,delete']);
-    Route::apiResource('lote-insumos', LoteInsumoController::class);
+    $recursoProtegido('lote-insumos', LoteInsumoController::class, 'lotes');
 
     // ACTIVIDADES
-    Route::apiResource('actividades', ActividadController::class);
+    $recursoProtegido('actividades', ActividadController::class, 'lotes');
 
     // CLIMA
-    Route::apiResource('climas', ClimaController::class);
+    $recursoProtegido('climas', ClimaController::class, 'lotes');
 
     // ========================================================
     // GRUPO: PEDIDOS (CLIENTE EXTERNO) - control granular API
@@ -148,7 +166,6 @@ Route::name('api.')->group(function () {
 
     // AUTH
     Route::post('/register', [AuthController::class, 'register'])->name('register');
-    Route::post('/register-admin', [AuthController::class, 'registerAdmin']);
     Route::post('/login',    [AuthController::class, 'login'])->name('login');
 
     Route::middleware('auth:sanctum')->group(function () {

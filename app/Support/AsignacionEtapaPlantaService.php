@@ -150,7 +150,7 @@ class AsignacionEtapaPlantaService
      */
     public function cerrarFase(LoteProduccionPedido $lote, array $etapa, Usuario $asignador): void
     {
-        if (! UsuarioRol::gestionaPlanta($asignador) && ! UsuarioRol::esAdminGlobal($asignador)) {
+        if (! UsuarioRol::gestionaPlanta($asignador)) {
             throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede cerrar fases.');
         }
 
@@ -221,7 +221,7 @@ class AsignacionEtapaPlantaService
 
     public function cambiarFase(LoteProduccionPedido $lote, int $loteproduccionrutapasoid, Usuario $usuario): void
     {
-        if (! UsuarioRol::gestionaPlanta($usuario) && ! UsuarioRol::esAdminGlobal($usuario)) {
+        if (! UsuarioRol::gestionaPlanta($usuario)) {
             throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede cambiar una fase.');
         }
 
@@ -320,7 +320,7 @@ class AsignacionEtapaPlantaService
 
         $esOperador = UsuarioRol::esOperarioPlanta($usuario)
             && (int) $asignacion->operador_usuarioid === (int) $usuario->usuarioid;
-        $esSupervisor = UsuarioRol::gestionaPlanta($usuario) || UsuarioRol::esAdminGlobal($usuario);
+        $esSupervisor = UsuarioRol::gestionaPlanta($usuario);
 
         if (! $esOperador && ! $esSupervisor) {
             throw new \InvalidArgumentException('No tiene permiso para completar esta tarea.');
@@ -449,7 +449,7 @@ class AsignacionEtapaPlantaService
      */
     public function completarPorSupervisor(AsignacionEtapaPlanta $asignacion, Usuario $supervisor, array $parametros = []): RegistroProcesoMaquinaPlanta
     {
-        if (! UsuarioRol::gestionaPlanta($supervisor) && ! UsuarioRol::esAdminGlobal($supervisor)) {
+        if (! UsuarioRol::gestionaPlanta($supervisor)) {
             throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede completar etapas desde procesamiento.');
         }
 
@@ -500,7 +500,7 @@ class AsignacionEtapaPlantaService
 
     public function reiniciarTodo(LoteProduccionPedido $lote, Usuario $usuario): void
     {
-        if (! UsuarioRol::gestionaPlanta($usuario) && ! UsuarioRol::esAdminGlobal($usuario)) {
+        if (! UsuarioRol::gestionaPlanta($usuario)) {
             throw new \InvalidArgumentException('Solo el jefe de planta o administrador puede reiniciar las asignaciones.');
         }
 

@@ -4,14 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\EnvioAsignacionMultiple;
+use App\Support\ViajeAcceso;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AsignacionMultipleController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $q = EnvioAsignacionMultiple::query()
+        // Ownership (TRA-02): el conductor solo lista sus envíos; comercial no ve el trayecto agrícola.
+        $q = ViajeAcceso::scopeEnviosAgricolas(EnvioAsignacionMultiple::query(), $request->user())
             ->with(['transportista', 'asignadoPor', 'ruta'])
             ->orderByDesc('created_at');
         $asignaciones = $q->paginate(30);

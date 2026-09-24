@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\IncidenteEnvio;
+use App\Support\ViajeAcceso;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -12,7 +13,8 @@ class IncidenteEnvioController extends Controller
 {
     public function index(Request $request): View
     {
-        $q = IncidenteEnvio::query()
+        // El conductor ve solo incidentes de sus viajes o reportados por él (TRA-07).
+        $q = ViajeAcceso::scopeIncidentes(IncidenteEnvio::query(), $request->user())
             ->with(['reportadoPor', 'resueltoPor', 'pedido'])
             ->orderByDesc('created_at');
 
@@ -59,7 +61,7 @@ class IncidenteEnvioController extends Controller
 
         $incidentes = $q->paginate(15)->withQueryString();
 
-        $tiposDisponibles = IncidenteEnvio::query()
+        $tiposDisponibles = ViajeAcceso::scopeIncidentes(IncidenteEnvio::query(), $request->user())
             ->select('tipo')
             ->distinct()
             ->orderBy('tipo')
@@ -86,6 +88,16 @@ class IncidenteEnvioController extends Controller
             'descripcion' => ['required', 'string', 'max:3000'],
         ]);
 
+        if (! ViajeAcceso::conductorPuedeReportarEn(
+            $request->user(),
+            $validated['externo_envio_id'] ?? null,
+            isset($validated['pedidoid']) ? (int) $validated['pedidoid'] : null
+        )) {
+            return back()->withInput()->withErrors([
+                'externo_envio_id' => 'Indique el código de uno de sus viajes asignados.',
+            ]);
+        }
+
         $validated['reportadopor_usuarioid'] = auth()->id();
         $validated['estado'] = 'abierto';
 
@@ -97,6 +109,7 @@ class IncidenteEnvioController extends Controller
 
     public function show(IncidenteEnvio $incidente): View
     {
+        abort_unless(ViajeAcceso::puedeVerIncidente(auth()->user(), $incidente), 403);
         $incidente->load(['reportadoPor', 'resueltoPor', 'pedido']);
 
         return view('logistica.incidentes.show', compact('incidente'));
@@ -104,11 +117,15 @@ class IncidenteEnvioController extends Controller
 
     public function edit(IncidenteEnvio $incidente): View
     {
+        abort_unless(ViajeAcceso::puedeModificarIncidente(auth()->user(), $incidente), 403);
+
         return view('logistica.incidentes.edit', compact('incidente'));
     }
 
     public function update(Request $request, IncidenteEnvio $incidente): RedirectResponse
     {
+        abort_unless(ViajeAcceso::puedeModificarIncidente($request->user(), $incidente), 403);
+
         $validated = $request->validate([
             'externo_envio_id' => ['nullable', 'string', 'max:64'],
             'pedidoid' => ['nullable', 'integer', 'exists:pedido,pedidoid'],
@@ -120,6 +137,17 @@ class IncidenteEnvioController extends Controller
 
         if (! auth()->user()?->can('incidentes.resolve')) {
             unset($validated['estado'], $validated['nota_resolucion']);
+        }
+
+        // El conductor no reasigna el incidente a un viaje ajeno.
+        if (! ViajeAcceso::conductorPuedeReportarEn(
+            $request->user(),
+            $validated['externo_envio_id'] ?? null,
+            isset($validated['pedidoid']) ? (int) $validated['pedidoid'] : null
+        )) {
+            return back()->withInput()->withErrors([
+                'externo_envio_id' => 'Indique el código de uno de sus viajes asignados.',
+            ]);
         }
 
         if (($validated['estado'] ?? null) === 'resuelto' && $incidente->estado !== 'resuelto') {
@@ -135,6 +163,10 @@ class IncidenteEnvioController extends Controller
 
     public function destroy(IncidenteEnvio $incidente): RedirectResponse
     {
+        // El conductor no elimina incidentes (ni propios ni ajenos): quedan como traza del viaje.
+        abort_if(ViajeAcceso::esConductor(auth()->user()), 403);
+        abort_unless(ViajeAcceso::puedeModificarIncidente(auth()->user(), $incidente), 403);
+
         $incidente->delete();
 
         return redirect()->route('logistica.incidentes.index')
@@ -143,6 +175,8 @@ class IncidenteEnvioController extends Controller
 
     public function resolve(Request $request, IncidenteEnvio $incidente): RedirectResponse
     {
+        abort_unless(ViajeAcceso::puedeVerIncidente($request->user(), $incidente), 403);
+
         $validated = $request->validate([
             'nota_resolucion' => ['nullable', 'string', 'max:2000'],
         ]);

@@ -15,6 +15,7 @@ use App\Support\MayoristaAccess;
 use App\Support\PuntoVentaAccess;
 use App\Support\RutaDistribucionNavegacion;
 use App\Support\UsuarioRol;
+use App\Support\ViajeAcceso;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -301,15 +302,8 @@ class EnvioCierreDistribucionPdvController extends Controller
             abort(403);
         }
 
-        if (
-            UsuarioRol::esAdminGlobal($user)
-            || $user->can('asignaciones.view')
-            || $user->can('asignaciones.update')
-            || UsuarioRol::puedeGestionarDistribucionMayorista($user)
-            || MayoristaAccess::puedeGestionarRutaDistribucion($user, $ruta)
-            || PuntoVentaAccess::puedeFirmarRecepcionRuta($user, $ruta)
-            || (int) $ruta->transportista_usuarioid === (int) $user->usuarioid
-        ) {
+        // Ownership (TRA-02): conductor asignado, mayorista de origen, minorista receptor o supervisión del admin.
+        if (ViajeAcceso::puedeVerRutaDistribucion($user, $ruta)) {
             return;
         }
 

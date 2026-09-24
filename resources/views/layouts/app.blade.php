@@ -1006,7 +1006,7 @@
     $userImg     = $authUser ? $authUser->avatarUrl() : \App\Support\UsuarioAvatar::placeholder();
     $userImgFallback = \App\Support\UsuarioAvatar::placeholder();
     $userRole    = $authUser ? ($authUser->getRoleNames()->first() ?? 'sin rol') : 'invitado';
-    $isAdmin     = $authUser && ($authUser->hasRole('Admin') || $authUser->hasRole('admin'));
+    $isAdmin     = \App\Support\UsuarioRol::esAdminGlobal($authUser);
     $esJefeAgr = $authUser && \App\Support\UsuarioRol::esJefeAgricultor($authUser);
     $esAgricultorOperativo = $authUser && \App\Support\UsuarioRol::debeAcotarPorAsignacion($authUser);
     $esPlantaOperativo = $authUser && \App\Support\UsuarioRol::esPlantaOperativo($authUser) && ! $isAdmin;
@@ -1144,6 +1144,8 @@
                     $puedeAlmacenPlanta = $isAdmin || $esPlantaOperativo || $esJefePlantaNav;
                 @endphp
 
+                {{-- TEMPORAL (solo UX): el admin no ve las secciones operativas en el sidebar. No afecta autorización backend. --}}
+                @if(! $isAdmin)
                 @if($showProdAgricola)
                 <span class="ag-nav-label">Producción agrícola</span>
 
@@ -1279,7 +1281,7 @@
                                 <i class="fas fa-chevron-right ag-sub-arrow"></i>
                             </a>
                             <ul class="ag-subnav ag-subnav-nested {{ $logMasOpen ? 'open' : '' }}" id="sub-log-mas">
-                                @if(($isAdmin || auth()->user()?->can('envios.view')) && ! auth()->user()?->hasRole('transportista'))
+                                @if(auth()->user()?->can('envios.view') && auth()->user()?->can('reportes.view'))
                                 <li class="ag-sub-li"><a href="{{ route('envios.reportes-distribucion') }}" class="ag-sub-a {{ request()->routeIs('envios.reportes-distribucion') ? 'active' : '' }}">Reportes distribución</a></li>
                                 @endif
                             </ul>
@@ -1397,7 +1399,7 @@
                         <li class="ag-sub-li">
                             <a href="{{ route('almacen-mayorista.index') }}" class="ag-sub-a {{ request()->routeIs('almacen-mayorista.index', 'almacen-mayorista.show', 'almacen-mayorista.create', 'almacen-mayorista.edit', 'almacen-mayorista.inventario.*') ? 'active' : '' }}">Almacenes</a>
                         </li>
-                        @can('inventario.read')
+                        @can('inventario.view')
                         <li class="ag-sub-li">
                             <a href="{{ route('almacen-mayorista.traslados-planta.index') }}" class="ag-sub-a {{ request()->routeIs('almacen-mayorista.traslados-planta.*') ? 'active' : '' }}">Recepciones de planta</a>
                         </li>
@@ -1476,8 +1478,9 @@
                     </ul>
                 </li>
                 @endif
+                @endif {{-- /TEMPORAL ! $isAdmin --}}
 
-                @if($isAdmin || auth()->user()?->can('usuarios.view') || \App\Support\ReporteCatalogo::usuarioTieneAcceso(auth()->user()))
+                @if(\App\Support\UsuarioRol::puedeGestionarUsuarios($authUser) || \App\Support\ReporteCatalogo::usuarioTieneAcceso(auth()->user()))
                 <span class="ag-nav-label">{{ ($esJefeAgr || ($authUser && $authUser->hasRole('jefe_planta'))) && ! $isAdmin ? 'Equipo' : 'Administración' }}</span>
 
                 @if($isAdmin && $pendientesSolicitudes > 0)
@@ -1490,7 +1493,7 @@
                 </li>
                 @endif
 
-                @if($isAdmin || auth()->user()?->can('usuarios.view'))
+                @if(\App\Support\UsuarioRol::puedeGestionarUsuarios($authUser))
                 <li class="ag-nav-li">
                     <a href="{{ route('gestion.index') }}" class="ag-nav-a {{ request()->routeIs('gestion.*') ? 'active' : '' }}">
                         <i class="ag-nav-icon fas fa-users-cog"></i>

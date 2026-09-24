@@ -150,7 +150,7 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
 
 
-        return Almacen::create([
+        $almacen = Almacen::create([
 
             'nombre' => $nombre,
 
@@ -166,9 +166,36 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
         ]);
 
+        // Todo destino mayorista tiene un mayorista responsable que pueda recibir (MAY-BUG-01).
+        if ($ambito === AlmacenAmbito::MAYORISTA) {
+            $this->mayoristaResponsable($almacen);
+        }
+
+        return $almacen->fresh();
+
     }
 
 
+
+    private function mayoristaResponsable(Almacen $almacen): Usuario
+    {
+        Role::findOrCreate('mayorista', 'web');
+
+        $user = Usuario::create([
+            'nombre' => 'Mayorista',
+            'apellido' => 'Destino',
+            'email' => 'mayorista.destino'.$almacen->almacenid.'@test.local',
+            'nombreusuario' => 'mayorista_destino_'.$almacen->almacenid,
+            'passwordhash' => Hash::make('Password'),
+            'role' => 'mayorista',
+            'fecharegistro' => now(),
+            'activo' => true,
+        ]);
+        $user->assignRole('mayorista');
+        $almacen->update(['responsable_usuarioid' => $user->usuarioid]);
+
+        return $user;
+    }
 
     /** @return array{transportista: Usuario, vehiculo: Vehiculo} */
 
@@ -195,6 +222,10 @@ class TrasladoPlantaMayoristaTest extends TestCase
             'activo' => true,
 
         ]);
+
+        // Rol canónico Spatie sincronizado con la columna legacy (TRA-09).
+        Role::findOrCreate('transportista', 'web');
+        $transportista->assignRole('transportista');
 
 
 
@@ -318,7 +349,8 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
 
 
-        app(TrasladoPlantaMayoristaService::class)->aceptar($ruta->fresh(), $admin);
+        // La aprobación de planta la hace el jefe de planta (el admin supervisa).
+        app(TrasladoPlantaMayoristaService::class)->aceptar($ruta->fresh(), $this->jefePlanta());
 
         $ruta->refresh();
 
@@ -366,7 +398,7 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
 
 
-    public function test_admin_puede_crear_traslado_desde_formulario(): void
+    public function test_admin_supervisor_no_crea_traslado_desde_formulario(): void
 
     {
 
@@ -404,13 +436,9 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
 
 
-        $ruta = RutaDistribucion::query()->first();
+        $response->assertForbidden();
 
-        $this->assertNotNull($ruta);
-
-        $response->assertRedirect(route('logistica.traslados-planta.show', $ruta));
-
-        $this->assertCount(1, $ruta->detallesTraslado);
+        $this->assertNull(RutaDistribucion::query()->first());
 
     }
 
@@ -657,7 +685,38 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
         $ruta->update(['estado' => RutaDistribucionCatalogo::ESTADO_PLANIFICADA]);
 
-        $service->transferirInventarioAlCompletar($ruta, $admin);
+        // Sin la firma del mayorista destino no se acredita nada (MAY-08).
+        try {
+            $service->transferirInventarioAlCompletar($ruta->fresh(), $admin);
+            $this->fail('La transferencia no debe aplicarse sin la recepción firmada por el mayorista destino.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('debe firmar la recepción', $e->getMessage());
+        }
+        $this->assertEquals(300.0, (float) $inventario->fresh()->cantidad_unidades);
+
+        $receptor = Usuario::query()->findOrFail($mayorista->fresh()->responsable_usuarioid);
+        \App\Models\FirmaTransportistaEnvio::create([
+            'rutadistribucionid' => $ruta->rutadistribucionid,
+            'imagenfirma' => 'data:image/png;base64,iVBORw0KGgo=',
+            'firmante_usuarioid' => $flota['transportista']->usuarioid,
+            'fechafirma' => now(),
+        ]);
+        \App\Models\FirmaRecepcionEnvio::create([
+            'rutadistribucionid' => $ruta->rutadistribucionid,
+            'imagenfirma' => 'data:image/png;base64,iVBORw0KGgo=',
+            'firmante_usuarioid' => $receptor->usuarioid,
+            'fechafirma' => now(),
+        ]);
+
+        $service->transferirInventarioAlCompletar($ruta->fresh(), $receptor);
+
+        // Idempotencia: una segunda llamada no vuelve a transferir.
+        try {
+            $service->transferirInventarioAlCompletar($ruta->fresh(), $receptor);
+            $this->fail('La transferencia del traslado no debe aplicarse dos veces.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('ya fue transferido', $e->getMessage());
+        }
 
         $inventario->refresh();
 
@@ -773,7 +832,10 @@ class TrasladoPlantaMayoristaTest extends TestCase
 
 
 
-        $response = $this->actingAs($admin)->patch(route('logistica.traslados-planta.empezar-ruta', $ruta));
+        // El admin supervisor no inicia transporte.
+        $this->actingAs($admin)->patch(route('logistica.traslados-planta.empezar-ruta', $ruta))->assertForbidden();
+
+        $response = $this->actingAs($this->jefePlanta())->patch(route('logistica.traslados-planta.empezar-ruta', $ruta));
 
         $response->assertRedirect();
 

@@ -128,6 +128,22 @@ class Usuario extends Authenticatable
         return $this->belongsTo(Almacen::class, 'almacenid', 'almacenid');
     }
 
+    /**
+     * Alta centralizada del transportista (TRA-09): quien guarda un usuario con role=transportista
+     * recibe también el rol Spatie canónico; los permisos y el ownership se resuelven con Spatie.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (Usuario $usuario) {
+            if (strtolower((string) $usuario->role) !== 'transportista' || $usuario->hasRole('transportista')) {
+                return;
+            }
+
+            \Spatie\Permission\Models\Role::findOrCreate('transportista', 'web');
+            $usuario->assignRole('transportista');
+        });
+    }
+
     public function perfilTransportista()
     {
         return $this->hasOne(PerfilTransportista::class, 'usuarioid', 'usuarioid');

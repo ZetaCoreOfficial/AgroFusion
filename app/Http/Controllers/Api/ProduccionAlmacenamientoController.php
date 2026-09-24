@@ -3,23 +3,29 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Almacen;
 use App\Models\ProduccionAlmacenamiento;
+use App\Support\AlmacenAcceso;
 use Illuminate\Http\Request;
 
+/** Registros de almacenamiento por API: solo sobre almacenes visibles/operados por el usuario (MAY-05). */
 class ProduccionAlmacenamientoController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
         return response()->json(
-            ProduccionAlmacenamiento::with(['produccion', 'almacen', 'unidadMedida'])->get()
+            AlmacenAcceso::scopeVisibles(ProduccionAlmacenamiento::query(), $request->user())
+                ->with(['produccion', 'almacen', 'unidadMedida'])
+                ->get()
         );
     }
 
-    public function show($id)
+    public function show(Request $request, $id)
     {
-        return response()->json(
-            ProduccionAlmacenamiento::with(['produccion', 'almacen', 'unidadMedida'])->findOrFail($id)
-        );
+        $registro = ProduccionAlmacenamiento::with(['produccion', 'almacen', 'unidadMedida'])->findOrFail($id);
+        abort_unless(in_array((int) $registro->almacenid, AlmacenAcceso::idsVisibles($request->user()), true), 404);
+
+        return response()->json($registro);
     }
 
     public function store(Request $request)
@@ -42,6 +48,8 @@ class ProduccionAlmacenamientoController extends Controller
             'observaciones'  => 'nullable|string|max:250',
         ]);
 
+        AlmacenAcceso::asegurarPuedeGestionar($request->user(), Almacen::query()->findOrFail($data['almacenid']));
+
         $registro = ProduccionAlmacenamiento::create($data);
 
         return response()->json(
@@ -53,6 +61,7 @@ class ProduccionAlmacenamientoController extends Controller
     public function update(Request $request, $id)
     {
         $registro = ProduccionAlmacenamiento::findOrFail($id);
+        AlmacenAcceso::asegurarPuedeGestionar($request->user(), Almacen::query()->findOrFail($registro->almacenid));
 
         $data = $request->validate([
             'produccionid'   => 'sometimes|exists:produccion,produccionid',
@@ -72,6 +81,10 @@ class ProduccionAlmacenamientoController extends Controller
             'observaciones'  => 'nullable|string|max:250',
         ]);
 
+        if (isset($data['almacenid'])) {
+            AlmacenAcceso::asegurarPuedeGestionar($request->user(), Almacen::query()->findOrFail($data['almacenid']));
+        }
+
         $registro->update($data);
 
         return response()->json(
@@ -79,9 +92,10 @@ class ProduccionAlmacenamientoController extends Controller
         );
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         $registro = ProduccionAlmacenamiento::findOrFail($id);
+        AlmacenAcceso::asegurarPuedeGestionar($request->user(), Almacen::query()->findOrFail($registro->almacenid));
         $registro->delete();
 
         return response()->json(['message' => 'Eliminado correctamente']);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\IncidenteEnvio;
+use App\Support\ViajeAcceso;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,7 +13,7 @@ class IncidenteEnvioController extends Controller
     public function index(Request $request): JsonResponse
     {
         $estado = $request->string('estado')->toString();
-        $q = IncidenteEnvio::query()
+        $q = ViajeAcceso::scopeIncidentes(IncidenteEnvio::query(), $request->user())
             ->with(['reportadoPor', 'resueltoPor', 'pedido'])
             ->when($estado !== '', fn($query) => $query->where('estado', $estado))
             ->orderByDesc('created_at');
@@ -31,6 +32,12 @@ class IncidenteEnvioController extends Controller
             'descripcion' => ['required', 'string', 'max:3000'],
         ]);
 
+        abort_unless(ViajeAcceso::conductorPuedeReportarEn(
+            $request->user(),
+            $validated['externo_envio_id'] ?? null,
+            isset($validated['pedidoid']) ? (int) $validated['pedidoid'] : null
+        ), 403, 'Solo puede reportar incidentes de sus viajes asignados.');
+
         $validated['reportadopor_usuarioid'] = auth()->id();
         $validated['estado'] = 'abierto';
 
@@ -41,6 +48,8 @@ class IncidenteEnvioController extends Controller
 
     public function resolve(Request $request, IncidenteEnvio $incidente): JsonResponse
     {
+        abort_unless(ViajeAcceso::puedeVerIncidente($request->user(), $incidente), 403);
+
         $validated = $request->validate([
             'nota_resolucion' => ['nullable', 'string', 'max:2000'],
         ]);

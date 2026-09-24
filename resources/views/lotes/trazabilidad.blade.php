@@ -231,6 +231,14 @@
                             Tx: {{ $certificacion_campo->blockchain_txid }}
                         </div>
                     @endif
+                    @if(in_array(($certificacion_campo->blockchain_estado ?? null), ['pendiente', 'error'], true))
+                        <form method="POST" action="{{ route('certificaciones.blockchain.sincronizar', $certificacion_campo) }}" class="mt-2">
+                            @csrf
+                            <button type="submit" class="btn btn-outline-success btn-sm">
+                                <i class="fas fa-sync-alt mr-1"></i> Actualizar blockchain
+                            </button>
+                        </form>
+                    @endif
                     @can('certificaciones.view')
                         <a href="{{ route('certificaciones.show', $certificacion_campo) }}" class="small d-inline-block mt-2" style="color:#2c5530;">
                             Ver detalle de certificación

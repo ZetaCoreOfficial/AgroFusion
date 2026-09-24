@@ -173,12 +173,14 @@ class ActividadLotePermisosTest extends TestCase
             ->assertOk();
     }
 
-    public function test_admin_puede_asignar_siembra_desde_trazabilidad(): void
+    public function test_jefe_agricultor_asigna_siembra_y_admin_no(): void
     {
         $admin = $this->createUser('admin');
+        $jefe = $this->createUser('jefe_agricultor');
         $agricultor = $this->createUser('agricultor', [
             'email' => 'agri.siembra@test.local',
             'nombreusuario' => 'agri_siembra',
+            'supervisor_usuarioid' => $jefe->usuarioid,
         ]);
         $estado = EstadoLoteTipo::query()->whereRaw('LOWER(nombre) LIKE ?', ['%planif%'])->first()
             ?? EstadoLoteTipo::query()->firstOrFail();
@@ -197,7 +199,14 @@ class ActividadLotePermisosTest extends TestCase
             'fechamodificacion' => now(),
         ]);
 
+        // El admin supervisa: no designa responsables de siembra.
         $this->actingAs($admin)
+            ->post(route('lotes.siembra.asignar', $lote), [
+                'usuarioid' => $agricultor->usuarioid,
+            ])
+            ->assertForbidden();
+
+        $this->actingAs($jefe)
             ->post(route('lotes.siembra.asignar', $lote), [
                 'usuarioid' => $agricultor->usuarioid,
             ])

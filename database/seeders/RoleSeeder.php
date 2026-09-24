@@ -18,7 +18,21 @@ class RoleSeeder extends Seeder
             Role::firstOrCreate(['name' => $nombre, 'guard_name' => 'web']);
         }
 
-        Role::firstOrCreate(['name' => 'Admin', 'guard_name' => 'web']);
+        // Slug canónico «admin»: migra usuarios que aún tengan el rol legacy «Admin».
+        Usuario::query()
+            ->where(function ($q) {
+                $q->where('role', 'Admin')
+                    ->orWhereHas('roles', fn ($r) => $r->where('name', 'Admin'));
+            })
+            ->each(function (Usuario $usuario) {
+                if ($usuario->hasRole('Admin')) {
+                    $usuario->removeRole('Admin');
+                }
+                $usuario->assignRole('admin');
+                $usuario->role = 'admin';
+                $usuario->fechamodificacion = now();
+                $usuario->save();
+            });
 
         $agricultorRole = Role::findByName('agricultor', 'web');
 

@@ -22,7 +22,7 @@
 <section class="content">
     <div class="container-fluid">
         <div class="row">
-            @if(auth()->user()?->can('transportistas.view') || auth()->user()?->hasRole('admin'))
+            @if(auth()->user()?->can('transportistas.view'))
             <div class="col-sm-6 col-lg-4 mb-3">
                 <a href="{{ route('envios.transportistas') }}" class="text-decoration-none text-body">
                     <div class="card log-mas-card">
@@ -37,7 +37,7 @@
                 </a>
             </div>
             @endif
-            @if(auth()->user()?->can('vehiculos.view') || auth()->user()?->hasRole('admin'))
+            @if(auth()->user()?->can('vehiculos.view'))
             <div class="col-sm-6 col-lg-4 mb-3">
                 <a href="{{ route('envios.vehiculos') }}" class="text-decoration-none text-body">
                     <div class="card log-mas-card">
@@ -82,7 +82,7 @@
                 </a>
             </div>
             @endcan
-            @if((auth()->user()?->can('envios.view') || auth()->user()?->hasRole('admin')) && !auth()->user()?->hasRole('transportista'))
+            @if((auth()->user()?->can('envios.view')) && !auth()->user()?->hasRole('transportista'))
             <div class="col-sm-6 col-lg-4 mb-3">
                 <a href="{{ route('envios.reportes-distribucion') }}" class="text-decoration-none text-body">
                     <div class="card log-mas-card">

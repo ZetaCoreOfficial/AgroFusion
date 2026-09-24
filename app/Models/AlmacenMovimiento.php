@@ -22,6 +22,7 @@ class AlmacenMovimiento extends Model
         'referencia',
         'destino_motivo',
         'observaciones',
+        'detallepedidodistribucionid',
     ];
 
     protected $casts = [

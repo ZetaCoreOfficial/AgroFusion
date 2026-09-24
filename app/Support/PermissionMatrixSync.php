@@ -29,11 +29,8 @@ final class PermissionMatrixSync
 
         $role = Role::firstOrCreate(['name' => $roleName, 'guard_name' => 'web']);
 
-        if (in_array('*', $assigned, true)) {
-            $role->syncPermissions($allPermissions);
-        } else {
-            $role->syncPermissions($assigned);
-        }
+        // Sin comodín: cada rol (incluido admin) recibe exactamente la lista de la matriz.
+        $role->syncPermissions($assigned);
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
     }

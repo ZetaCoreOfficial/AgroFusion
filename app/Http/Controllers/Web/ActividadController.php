@@ -916,9 +916,7 @@ class ActividadController extends Controller
 
     private function puedeDesignarResponsableActividad(?Usuario $user): bool
     {
-        return $user && (
-            UsuarioRol::esAdminGlobal($user) || UsuarioRol::esJefeAgricultor($user)
-        );
+        return UsuarioRol::gestionaCampo($user);
     }
 
     /** @return array<string, mixed> */
@@ -954,8 +952,9 @@ class ActividadController extends Controller
             return false;
         }
 
-        if (! $actor || UsuarioRol::esAdminGlobal($actor)) {
-            return true;
+        // El admin supervisa: no designa responsables de actividades.
+        if (! UsuarioRol::puedeOperar($actor)) {
+            return false;
         }
 
         if (UsuarioRol::esJefeAgricultor($actor)) {

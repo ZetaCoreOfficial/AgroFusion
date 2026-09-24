@@ -148,13 +148,16 @@ class PedidoDistribucionMayoristaService
 
                 }
 
-            } else {
-
-                $updates['almacen_mayorista_origenid'] = null;
-
             }
 
+            // El origen ya no se borra cuando falta stock: el pedido sigue asignado a este mayorista
+            // (MAY-11) y pasa por coordinación con planta.
             $pedido->update($updates);
+
+            // Reserva: dos pedidos confirmados no consumen el mismo stock (MAY-10).
+            if (! $requierePlanta) {
+                app(PedidoDistribucionReservaService::class)->reservar($pedido->fresh(['detalles.presentacion', 'detalles.insumo']));
+            }
 
             return $pedido->fresh([
 
@@ -470,17 +473,18 @@ class PedidoDistribucionMayoristaService
      */
     public function actualizarSolicitud(PedidoDistribucion $pedido, array $data, Usuario $usuario): PedidoDistribucion
     {
-        if (! PedidoDistribucionCatalogo::puedeEditarFlujoAntesDeRuta($pedido)) {
-            throw new InvalidArgumentException('El pedido ya no puede editarse.');
+        // Pedido confirmado/en tránsito/recibido: contenido comercial congelado (MIN-04).
+        if (! PedidoDistribucionCatalogo::puedeEditarSolicitudMinorista($pedido)) {
+            throw new InvalidArgumentException('El pedido ya fue aceptado por el mayorista: su contenido no puede editarse. Pida que lo devuelva a revisión.');
         }
 
-        $pedido->loadMissing(['detalles.insumo', 'puntoVenta']);
+        $pedido->loadMissing(['detalles.insumo', 'detalles.presentacion', 'puntoVenta']);
 
-        $esAdmin = \App\Support\UsuarioRol::esAdminGlobal($usuario);
+        // Solo el minorista dueño edita su solicitud (el admin supervisa).
         $esDueño = \App\Support\UsuarioRol::esMinorista($usuario)
             && (int) $pedido->puntoVenta?->usuarioid === (int) $usuario->usuarioid;
 
-        if (! $esAdmin && ! $esDueño) {
+        if (! $esDueño) {
             throw new InvalidArgumentException('No tiene permiso para editar esta solicitud.');
         }
 
@@ -489,8 +493,15 @@ class PedidoDistribucionMayoristaService
             throw new InvalidArgumentException('La cantidad debe ser mayor que cero.');
         }
 
-        $insumoId = (int) ($data['insumoid'] ?? $pedido->detalles->first()?->insumoid);
+        $detalleActual = $pedido->detalles->first();
+        $insumoId = (int) ($data['insumoid'] ?? $detalleActual?->insumoid);
         $insumo = \App\Models\Insumo::query()->with('almacen')->findOrFail($insumoId);
+
+        // La presentación de la línea es parte de la cantidad: cambiar de producto es otra solicitud.
+        $presentacion = $detalleActual?->presentacion;
+        if ($presentacion !== null && (int) $presentacion->insumoid !== $insumoId) {
+            throw new InvalidArgumentException('Para cambiar de producto cree una nueva solicitud.');
+        }
 
         $almacenId = (int) ($data['almacen_mayorista_origenid'] ?? $pedido->almacen_mayorista_origenid ?? $insumo->almacenid);
         $almacen = \App\Models\Almacen::query()->findOrFail($almacenId);
@@ -503,7 +514,18 @@ class PedidoDistribucionMayoristaService
             throw new InvalidArgumentException('El producto no pertenece al almacén mayorista indicado.');
         }
 
-        if ($cantidad > (float) $insumo->stock) {
+        // Misma semántica que al crear (MIN-05): unidades de la presentación contra el stock por
+        // presentación; antes la edición comparaba esas unidades contra el stock agregado en kg.
+        if ($presentacion !== null) {
+            $inventario = app(InventarioPresentacionService::class);
+            $inventario->asegurarInventarioDesdeStock($almacenId, $insumoId);
+            $disponible = $inventario->stockTotalUnidades($almacenId, (int) $presentacion->insumo_presentacionid);
+            if ($cantidad > $disponible + 0.0001) {
+                throw new InvalidArgumentException(
+                    'La cantidad supera el stock disponible: '.number_format($disponible, 0).' '.$presentacion->etiquetaUnidad().'.'
+                );
+            }
+        } elseif ($cantidad > (float) $insumo->stock) {
             throw new InvalidArgumentException('La cantidad supera el stock disponible en el almacén mayorista.');
         }
 
@@ -512,10 +534,6 @@ class PedidoDistribucionMayoristaService
 
         if ($esDueño && (int) $punto->usuarioid !== (int) $usuario->usuarioid) {
             throw new InvalidArgumentException('Solo puede solicitar para sus propios puntos de venta.');
-        }
-
-        if ($esAdmin && isset($data['minorista_usuarioid']) && (int) $punto->usuarioid !== (int) $data['minorista_usuarioid']) {
-            throw new InvalidArgumentException('El punto de venta no pertenece al minorista seleccionado.');
         }
 
         return DB::transaction(function () use ($pedido, $data, $cantidad, $insumo, $almacenId, $puntoId) {
@@ -548,7 +566,19 @@ class PedidoDistribucionMayoristaService
     {
         $pedido->loadMissing('detalles');
 
-        $idsOrdenados = array_values(array_filter(array_map('intval', $ordenPreferido ?? [])));
+        // Solo almacenes de las líneas del pedido (o su cabecera): un orden de recogida no puede
+        // incorporar almacenes ajenos (MAY-04).
+        $idsDelPedido = $pedido->detalles
+            ->pluck('almacen_mayorista_origenid')
+            ->push($pedido->almacen_mayorista_origenid)
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->all();
+        $idsOrdenados = array_values(array_intersect(
+            array_filter(array_map('intval', $ordenPreferido ?? [])),
+            $idsDelPedido
+        ));
 
         if ($idsOrdenados === []) {
             foreach ($pedido->detalles as $detalle) {
